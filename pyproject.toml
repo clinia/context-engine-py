@@ -1,0 +1,52 @@
+[project]
+name = "clinia-context-engine"
+version = "0.8.0"
+description = "Python client for the Clinia Context Engine API"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+dependencies = [
+  "httpx>=0.27,<1",
+  "pydantic>=2.7,<3",
+]
+
+[project.urls]
+Homepage = "https://www.clinia.com"
+
+[dependency-groups]
+dev = [
+  "pytest>=8",
+  "pytest-asyncio>=0.24",
+  "respx>=0.22",
+  "pyright>=1.1.390",
+  "ruff>=0.8",
+  "datamodel-code-generator>=0.78",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/clinia_context_engine"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "README.md", "LICENSE"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+# Generated models keep spec-ordered fields; import sorting still applies.
+# RUF001-003: descriptions are the spec's prose, typography included.
+per-file-ignores = { "src/clinia_context_engine/generated/*" = ["E501", "RUF001", "RUF002", "RUF003"] }
+
+[tool.pyright]
+include = ["src", "tests", "examples"]
+typeCheckingMode = "strict"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
