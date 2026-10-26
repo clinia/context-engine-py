@@ -35,13 +35,17 @@ class Version(BaseModel):
 
 class ServiceInfo(BaseModel):
     """
-    Identity of the running service: its name and the build it came from. Reports what this process resolved at startup, which for edge builds is more specific than any released version.
+    Identity and status of the running service: its name, whether it can serve requests, and the build it came from. Build identity is what this process resolved at startup, which for edge builds is more specific than any released version.
     """
 
     model_config = ConfigDict(
         populate_by_name=True,
     )
     name: str = Field(..., description="Display name of the service.")
+    status: Literal["healthy", "degraded"] = Field(
+        ...,
+        description="Whether the service can currently serve requests. `degraded` means requests that read or write data are expected to fail; it is always served with a `503`.",
+    )
     version: Version = Field(..., description="Build identity of the running process.")
 
 
@@ -68,7 +72,7 @@ class PatientDemographics(BaseModel):
     )
     id: str = Field(
         ...,
-        description="Internal patient ID extracted from the ingested record (e.g., FHIR Patient.id). Used in VFS paths.",
+        description="The patient ID, the identifier the caller chose when creating the patient.",
     )
     name: str = Field(..., description="Patient display name extracted from the ingested record.")
 
@@ -107,8 +111,7 @@ class PatientDetail(BaseModel):
         populate_by_name=True,
     )
     id: str = Field(
-        ...,
-        description="Internal patient ID extracted from the ingested record. Used in VFS paths.",
+        ..., description="The patient ID, used in every REST route, VFS path and MCP tool."
     )
     name: str = Field(..., description="Patient display name extracted from the ingested record.")
     birth_date: str | None = Field(
@@ -457,6 +460,7 @@ class IngestionStaged(BaseModel):
     facts: int = Field(..., description="Clinical facts staged.", ge=0)
     events: int = Field(..., description="Clinical events staged.", ge=0)
     narratives: int = Field(..., description="Prose passages staged.", ge=0)
+    messages: int = Field(..., description="Conversation messages staged.", ge=0)
 
 
 class IngestFhirBody(BaseModel):
@@ -481,6 +485,14 @@ class IngestFhirBody(BaseModel):
     entry: list[Any] | None = Field(
         None, description="A Bundle's entries. Absent when the body is a single resource."
     )
+
+
+class IngestSessionsMessage(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    role: Literal["user", "assistant"] = Field(..., description="Author of the message.")
+    content: str = Field(..., description="Message text.", min_length=1)
 
 
 class Meta2(BaseModel):
@@ -565,24 +577,15 @@ class SessionMemory(BaseModel):
     )
 
 
-class IngestSessionBody(BaseModel):
-    """
-    A complete set of messages to ingest as a single closed session.
-    """
-
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    messages: list[Message] = Field(
-        ..., description="Every message to replay, in chronological order.", min_length=1
-    )
-
-
 class Child(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
     name: str = Field(..., description="Name of the child node (filename or directory name).")
+    display: str | None = Field(
+        None,
+        description="Human-readable label for the child. Shown beside `name`, never used in a path.",
+    )
     type: Literal["directory", "file"] = Field(
         ..., description="Whether this child is a directory or a file."
     )
@@ -640,14 +643,14 @@ class Code(BaseModel):
 
 class EffectivePeriod(BaseModel):
     """
-    Temporal bounds of the fact's validity.
+    When the fact held: `start` is when it became active, `end` when it ended or was resolved.
     """
 
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    start: str | None = Field(None, description="ISO date when this fact became active.")
-    end: str | None = Field(None, description="ISO date when this fact ended or was resolved.")
+    start: str | None = Field(None, description="ISO date when it began.")
+    end: str | None = Field(None, description="ISO date when it ended.")
 
 
 class Source1(BaseModel):
@@ -688,22 +691,28 @@ class Payload(BaseModel):
         None,
         description="Clinical codes for this fact (SNOMED, ICD-10, RxNorm, CVX…). More than one when multiple coding systems apply.",
     )
-    date: str | None = Field(
+    authored_at: str | None = Field(
         None,
-        description="ISO date when this fact was recorded or last updated in the source system.",
-    )
-    effective_period: EffectivePeriod | None = Field(
-        None, alias="effectivePeriod", description="Temporal bounds of the fact's validity."
+        alias="authoredAt",
+        description="ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time.",
     )
     type: Literal["condition"]
+    effective_period: EffectivePeriod | None = Field(
+        None,
+        alias="effectivePeriod",
+        description="When the fact held: `start` is when it became active, `end` when it ended or was resolved.",
+    )
     status: Literal["active", "resolved", "inactive", "unknown"] = Field(
         ...,
         description="Clinical status of the condition. active = currently present; resolved = no longer present; inactive = present but not actively managed.",
     )
-    onset_date: str | None = Field(
+    asserted_at: str | None = Field(
         None,
-        alias="onsetDate",
-        description="ISO date when the condition first started, from Condition.onsetPeriod.start or onsetDateTime.",
+        alias="assertedAt",
+        description="ISO date when a clinician stated it held. Shows it held then, not when it started.",
+    )
+    status_changed_at: str | None = Field(
+        None, alias="statusChangedAt", description="ISO date when its status last changed."
     )
     source: Source1 = Field(..., description="Where this fact was extracted from.")
     ingestion_id: str = Field(
@@ -711,46 +720,24 @@ class Payload(BaseModel):
     )
 
 
-class Payload1(BaseModel):
+class PlannedPeriod(BaseModel):
     """
-    Type-specific attributes of an `extracted_fact` node.
+    When it is intended to happen, as opposed to when it did: a scheduled encounter or procedure, the intended dosing or therapy span.
     """
 
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    display: str = Field(
-        ..., description="Human-readable label — condition name, drug name, vaccine name, etc."
+    start: str | None = Field(None, description="ISO date when it began.")
+    end: str | None = Field(None, description="ISO date when it ended.")
+
+
+class ReactionPeriod(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
     )
-    codes: list[Code] | None = Field(
-        None,
-        description="Clinical codes for this fact (SNOMED, ICD-10, RxNorm, CVX…). More than one when multiple coding systems apply.",
-    )
-    date: str | None = Field(
-        None,
-        description="ISO date when this fact was recorded or last updated in the source system.",
-    )
-    effective_period: EffectivePeriod | None = Field(
-        None, alias="effectivePeriod", description="Temporal bounds of the fact's validity."
-    )
-    type: Literal["medication"]
-    status: Literal["active", "on-hold", "completed", "discontinued", "unknown"] = Field(
-        ...,
-        description="Current regimen status. active = currently taking; on-hold = temporarily paused; completed = full course finished as planned; discontinued = stopped early or cancelled; unknown = indeterminate.",
-    )
-    dosage_instructions: str | None = Field(
-        None,
-        alias="dosageInstructions",
-        description="Free-text dosage instructions from MedicationStatement.dosage[].additionalInstruction[].text, e.g. 'Take 1 tablet by mouth daily for hypertension.'",
-    )
-    route: str | None = Field(
-        None,
-        description="Route of administration from dosage[].route, e.g. 'Oral', 'IV', 'Topical'.",
-    )
-    source: Source1 = Field(..., description="Where this fact was extracted from.")
-    ingestion_id: str = Field(
-        ..., alias="ingestionId", description="The ingestion request that introduced this row."
-    )
+    start: str | None = Field(None, description="ISO date when it began.")
+    end: str | None = Field(None, description="ISO date when it ended.")
 
 
 class Payload2(BaseModel):
@@ -768,12 +755,10 @@ class Payload2(BaseModel):
         None,
         description="Clinical codes for this fact (SNOMED, ICD-10, RxNorm, CVX…). More than one when multiple coding systems apply.",
     )
-    date: str | None = Field(
+    authored_at: str | None = Field(
         None,
-        description="ISO date when this fact was recorded or last updated in the source system.",
-    )
-    effective_period: EffectivePeriod | None = Field(
-        None, alias="effectivePeriod", description="Temporal bounds of the fact's validity."
+        alias="authoredAt",
+        description="ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time.",
     )
     type: Literal["allergy"]
     status: Literal["active", "inactive", "entered-in-error"] = Field(
@@ -792,6 +777,21 @@ class Payload2(BaseModel):
         None,
         description="Observed reaction manifestations as display strings from reaction[].manifestation, e.g. ['Swelling', 'Anaphylaxis'].",
     )
+    effective_period: EffectivePeriod | None = Field(
+        None,
+        alias="effectivePeriod",
+        description="When the fact held: `start` is when it became active, `end` when it ended or was resolved.",
+    )
+    reaction_periods: list[ReactionPeriod] | None = Field(
+        None,
+        alias="reactionPeriods",
+        description="When each recorded reaction to the substance or vaccine started and ended.",
+    )
+    last_reaction_at: str | None = Field(
+        None,
+        alias="lastReactionAt",
+        description="ISO date of the most recent known reaction to the substance.",
+    )
     source: Source1 = Field(..., description="Where this fact was extracted from.")
     ingestion_id: str = Field(
         ..., alias="ingestionId", description="The ingestion request that introduced this row."
@@ -804,6 +804,10 @@ class Condition(BaseModel):
     )
     display: str = Field(
         ..., description="Condition name for this relative, e.g. 'Multiple sclerosis'."
+    )
+    onset: str | float | None = Field(
+        None,
+        description="When the relative developed the condition: an ISO date, or their age in years.",
     )
 
 
@@ -822,12 +826,10 @@ class Payload3(BaseModel):
         None,
         description="Clinical codes for this fact (SNOMED, ICD-10, RxNorm, CVX…). More than one when multiple coding systems apply.",
     )
-    date: str | None = Field(
+    authored_at: str | None = Field(
         None,
-        description="ISO date when this fact was recorded or last updated in the source system.",
-    )
-    effective_period: EffectivePeriod | None = Field(
-        None, alias="effectivePeriod", description="Temporal bounds of the fact's validity."
+        alias="authoredAt",
+        description="ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time.",
     )
     type: Literal["family_history"]
     relationship: str = Field(
@@ -840,6 +842,15 @@ class Payload3(BaseModel):
     conditions: list[Condition] = Field(
         ...,
         description="Health conditions recorded for this relative from FamilyMemberHistory.condition[].",
+    )
+    birth_date: str | None = Field(
+        None, alias="birthDate", description="ISO date when the relative was born."
+    )
+    death: str | float | None = Field(
+        None, description="When the relative died: an ISO date, or their age in years at death."
+    )
+    age: str | float | None = Field(
+        None, description="The relative's age: in years, or as the source states it."
     )
     source: Source1 = Field(..., description="Where this fact was extracted from.")
     ingestion_id: str = Field(
@@ -862,12 +873,10 @@ class Payload4(BaseModel):
         None,
         description="Clinical codes for this fact (SNOMED, ICD-10, RxNorm, CVX…). More than one when multiple coding systems apply.",
     )
-    date: str | None = Field(
+    authored_at: str | None = Field(
         None,
-        description="ISO date when this fact was recorded or last updated in the source system.",
-    )
-    effective_period: EffectivePeriod | None = Field(
-        None, alias="effectivePeriod", description="Temporal bounds of the fact's validity."
+        alias="authoredAt",
+        description="ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time.",
     )
     type: Literal["social_history"]
     category: str | None = Field(
@@ -877,6 +886,21 @@ class Payload4(BaseModel):
     value: str | None = Field(
         None,
         description="Current state as a string from Observation.valueString or valueCodeableConcept.text, e.g. 'Smokeless tobacco non-user', 'Current every day smoker'.",
+    )
+    effective_period: EffectivePeriod | None = Field(
+        None,
+        alias="effectivePeriod",
+        description="When the fact held: `start` is when it became active, `end` when it ended or was resolved.",
+    )
+    occurred_at: str | None = Field(
+        None,
+        alias="occurredAt",
+        description="ISO date when it happened, for something that happened at a point in time.",
+    )
+    issued_at: str | None = Field(
+        None,
+        alias="issuedAt",
+        description="ISO date when the result was released, which comes after it was measured.",
     )
     source: Source1 = Field(..., description="Where this fact was extracted from.")
     ingestion_id: str = Field(
@@ -899,22 +923,38 @@ class Payload5(BaseModel):
         None,
         description="Clinical codes for this fact (SNOMED, ICD-10, RxNorm, CVX…). More than one when multiple coding systems apply.",
     )
-    date: str | None = Field(
+    authored_at: str | None = Field(
         None,
-        description="ISO date when this fact was recorded or last updated in the source system.",
-    )
-    effective_period: EffectivePeriod | None = Field(
-        None, alias="effectivePeriod", description="Temporal bounds of the fact's validity."
+        alias="authoredAt",
+        description="ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time.",
     )
     type: Literal["immunization"]
     status: Literal["completed", "not-done"] = Field(
         ...,
         description="Administration status from Immunization.status. HG provides individual shot records — each administered vaccine is its own Fact, not a rolled-up series status.",
     )
-    occurrence_date: str | None = Field(
+    occurred_at: str | None = Field(
         None,
-        alias="occurrenceDate",
+        alias="occurredAt",
         description="ISO date when the vaccine was administered, from Immunization.occurrenceDateTime.",
+    )
+    reaction_periods: list[ReactionPeriod] | None = Field(
+        None,
+        alias="reactionPeriods",
+        description="When each recorded reaction to the substance or vaccine started and ended.",
+    )
+    expires_at: str | None = Field(
+        None, alias="expiresAt", description="ISO date when the vaccine lot or device expires."
+    )
+    info_published_at: str | None = Field(
+        None,
+        alias="infoPublishedAt",
+        description="ISO date when the vaccine information statement was published.",
+    )
+    info_presented_at: str | None = Field(
+        None,
+        alias="infoPresentedAt",
+        description="ISO date when the vaccine information statement was given to the patient.",
     )
     source: Source1 = Field(..., description="Where this fact was extracted from.")
     ingestion_id: str = Field(
@@ -937,17 +977,26 @@ class Payload6(BaseModel):
         None,
         description="Clinical codes for this fact (SNOMED, ICD-10, RxNorm, CVX…). More than one when multiple coding systems apply.",
     )
-    date: str | None = Field(
+    authored_at: str | None = Field(
         None,
-        description="ISO date when this fact was recorded or last updated in the source system.",
-    )
-    effective_period: EffectivePeriod | None = Field(
-        None, alias="effectivePeriod", description="Temporal bounds of the fact's validity."
+        alias="authoredAt",
+        description="ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time.",
     )
     type: Literal["device"]
     status: Literal["active", "inactive", "entered-in-error", "unknown"] = Field(
         ...,
         description="Whether the device is currently in use. active = currently implanted or in active use; inactive = removed or no longer used; unknown = not reported by the source.",
+    )
+    effective_period: EffectivePeriod | None = Field(
+        None,
+        alias="effectivePeriod",
+        description="When the fact held: `start` is when it became active, `end` when it ended or was resolved.",
+    )
+    manufactured_at: str | None = Field(
+        None, alias="manufacturedAt", description="ISO date when the device was made."
+    )
+    expires_at: str | None = Field(
+        None, alias="expiresAt", description="ISO date when the vaccine lot or device expires."
     )
     source: Source1 = Field(..., description="Where this fact was extracted from.")
     ingestion_id: str = Field(
@@ -970,18 +1019,20 @@ class Payload7(BaseModel):
         None,
         description="Clinical codes for this fact (SNOMED, ICD-10, RxNorm, CVX…). More than one when multiple coding systems apply.",
     )
-    date: str | None = Field(
+    authored_at: str | None = Field(
         None,
-        description="ISO date when this fact was recorded or last updated in the source system.",
-    )
-    effective_period: EffectivePeriod | None = Field(
-        None, alias="effectivePeriod", description="Temporal bounds of the fact's validity."
+        alias="authoredAt",
+        description="ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time.",
     )
     type: Literal["demographic"]
     birth_date: str | None = Field(
         None,
         alias="birthDate",
         description="Patient date of birth in ISO format (YYYY-MM-DD), from Patient.birthDate.",
+    )
+    death: str | float | None = Field(
+        None,
+        description="When the patient died: an ISO date from Patient.deceasedDateTime, or their age in years at death.",
     )
     sex: str | None = Field(
         None, description="Administrative sex from Patient.gender, e.g. 'male', 'female'."
@@ -1011,12 +1062,10 @@ class Payload8(BaseModel):
         None,
         description="Clinical codes for this fact (SNOMED, ICD-10, RxNorm, CVX…). More than one when multiple coding systems apply.",
     )
-    date: str | None = Field(
+    authored_at: str | None = Field(
         None,
-        description="ISO date when this fact was recorded or last updated in the source system.",
-    )
-    effective_period: EffectivePeriod | None = Field(
-        None, alias="effectivePeriod", description="Temporal bounds of the fact's validity."
+        alias="authoredAt",
+        description="ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time.",
     )
     type: Literal["insurance"]
     status: Literal["active", "cancelled", "draft", "entered-in-error"] = Field(
@@ -1029,6 +1078,11 @@ class Payload8(BaseModel):
     )
     member_id: str | None = Field(
         None, alias="memberId", description="Member identifier from Coverage.identifier[].value."
+    )
+    effective_period: EffectivePeriod | None = Field(
+        None,
+        alias="effectivePeriod",
+        description="When the fact held: `start` is when it became active, `end` when it ended or was resolved.",
     )
     source: Source1 = Field(..., description="Where this fact was extracted from.")
     ingestion_id: str = Field(
@@ -1051,12 +1105,10 @@ class Payload9(BaseModel):
         None,
         description="Clinical codes for this fact (SNOMED, ICD-10, RxNorm, CVX…). More than one when multiple coding systems apply.",
     )
-    date: str | None = Field(
+    authored_at: str | None = Field(
         None,
-        description="ISO date when this fact was recorded or last updated in the source system.",
-    )
-    effective_period: EffectivePeriod | None = Field(
-        None, alias="effectivePeriod", description="Temporal bounds of the fact's validity."
+        alias="authoredAt",
+        description="ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time.",
     )
     type: Literal["directive"]
     status: Literal["active", "void", "entered-in-error"] = Field(
@@ -1067,43 +1119,252 @@ class Payload9(BaseModel):
         None,
         description="Directive content extracted from the source document (e.g. living will, POLST). HG delivers these as PDFs rather than structured Consent resources.",
     )
+    effective_period: EffectivePeriod | None = Field(
+        None,
+        alias="effectivePeriod",
+        description="When the fact held: `start` is when it became active, `end` when it ended or was resolved.",
+    )
+    signed_at: str | None = Field(
+        None, alias="signedAt", description="ISO date when the patient agreed to or signed it."
+    )
+    verified_at: str | None = Field(
+        None,
+        alias="verifiedAt",
+        description="ISO date when someone last confirmed it is still valid.",
+    )
     source: Source1 = Field(..., description="Where this fact was extracted from.")
     ingestion_id: str = Field(
         ..., alias="ingestionId", description="The ingestion request that introduced this row."
     )
 
 
-class ExtractedFactNode(BaseModel):
+class EvidenceItem(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    system: str
+    code: str
+    display: str | None = None
+
+
+class MedicationRouteEvidence1(BaseModel):
     """
-    An `extracted_fact` node in the patient context graph.
+    One step's decision about a medication record's route: the route it named and how. `code-match` reads the product's dose form, `phrase-match` the record's texts, `evaluation` and `judgement` ask a model. A model's decision below its confidence threshold, or one the model is not sure of, stays as evidence without giving the route.
     """
 
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    type: Literal["extracted_fact"]
-    id: str = Field(
+    route: Literal[
+        "oral",
+        "rectal",
+        "sublingual",
+        "buccal",
+        "nasogastric",
+        "intramuscular",
+        "intravenous",
+        "subcutaneous",
+        "intradermal",
+        "intrathecal",
+        "intraperitoneal",
+        "intra-articular",
+        "intraosseous",
+        "hemodialysis",
+        "urethral",
+        "intrauterine",
+        "intraocular",
+        "intravesical",
+        "topical",
+        "transdermal",
+        "ophthalmic",
+        "otic",
+        "nasal",
+        "vaginal",
+        "inhalation",
+        "nebulization",
+        "other",
+    ] = Field(
         ...,
-        description="Unique identifier for this node, as a prefixed node id (`{type}_{id}`, e.g. `ef_...`).",
+        description="A route group, or `other` for a route outside every group. Absent from an identity when the route is unknown.",
     )
-    created_at: str = Field(
-        ..., alias="createdAt", description="ISO 8601 timestamp when this node was first created."
+    method: Literal["code-match"]
+    evidence: list[EvidenceItem] = Field(
+        ..., description="The RxNorm dose forms that named the route."
     )
-    updated_at: str = Field(
-        ..., alias="updatedAt", description="ISO 8601 timestamp when this node was last updated."
+
+
+class EvidenceItem1(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
     )
-    payload: (
-        Payload
-        | Payload1
-        | Payload2
-        | Payload3
-        | Payload4
-        | Payload5
-        | Payload6
-        | Payload7
-        | Payload8
-        | Payload9
-    ) = Field(..., description="Type-specific attributes of an `extracted_fact` node.")
+    text: str = Field(..., description="The text the phrase was found in, as read from the record.")
+    phrase: str = Field(..., description="The route phrase that matched, in lower-case words.")
+
+
+class MedicationRouteEvidence2(BaseModel):
+    """
+    One step's decision about a medication record's route: the route it named and how. `code-match` reads the product's dose form, `phrase-match` the record's texts, `evaluation` and `judgement` ask a model. A model's decision below its confidence threshold, or one the model is not sure of, stays as evidence without giving the route.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    route: Literal[
+        "oral",
+        "rectal",
+        "sublingual",
+        "buccal",
+        "nasogastric",
+        "intramuscular",
+        "intravenous",
+        "subcutaneous",
+        "intradermal",
+        "intrathecal",
+        "intraperitoneal",
+        "intra-articular",
+        "intraosseous",
+        "hemodialysis",
+        "urethral",
+        "intrauterine",
+        "intraocular",
+        "intravesical",
+        "topical",
+        "transdermal",
+        "ophthalmic",
+        "otic",
+        "nasal",
+        "vaginal",
+        "inhalation",
+        "nebulization",
+        "other",
+    ] = Field(
+        ...,
+        description="A route group, or `other` for a route outside every group. Absent from an identity when the route is unknown.",
+    )
+    method: Literal["phrase-match"]
+    evidence: list[EvidenceItem1] = Field(
+        ..., description="The texts that named the route, each with the phrase that matched."
+    )
+
+
+class Model(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    provider: str = Field(..., description="Model provider identifier.", min_length=1)
+    model: str = Field(..., description="Exact provider model identifier.", min_length=1)
+    version: str | None = Field(
+        None,
+        description="Provider model version when it is distinct from the model identifier.",
+        min_length=1,
+    )
+
+
+class Evidence(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    system: str
+    code: str
+    display: str | None = None
+
+
+class MedicationRouteEvidence3(BaseModel):
+    """
+    One step's decision about a medication record's route: the route it named and how. `code-match` reads the product's dose form, `phrase-match` the record's texts, `evaluation` and `judgement` ask a model. A model's decision below its confidence threshold, or one the model is not sure of, stays as evidence without giving the route.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    route: Literal[
+        "oral",
+        "rectal",
+        "sublingual",
+        "buccal",
+        "nasogastric",
+        "intramuscular",
+        "intravenous",
+        "subcutaneous",
+        "intradermal",
+        "intrathecal",
+        "intraperitoneal",
+        "intra-articular",
+        "intraosseous",
+        "hemodialysis",
+        "urethral",
+        "intrauterine",
+        "intraocular",
+        "intravesical",
+        "topical",
+        "transdermal",
+        "ophthalmic",
+        "otic",
+        "nasal",
+        "vaginal",
+        "inhalation",
+        "nebulization",
+        "other",
+    ] = Field(
+        ...,
+        description="A route group, or `other` for a route outside every group. Absent from an identity when the route is unknown.",
+    )
+    method: Literal["evaluation"]
+    confidence: float = Field(
+        ..., description="The probability the model gave this route, from 0 to 1."
+    )
+    model: Model
+    evidence: list[str | Evidence] = Field(..., description="The texts and codings the model read.")
+
+
+class MedicationRouteEvidence4(BaseModel):
+    """
+    One step's decision about a medication record's route: the route it named and how. `code-match` reads the product's dose form, `phrase-match` the record's texts, `evaluation` and `judgement` ask a model. A model's decision below its confidence threshold, or one the model is not sure of, stays as evidence without giving the route.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    route: Literal[
+        "oral",
+        "rectal",
+        "sublingual",
+        "buccal",
+        "nasogastric",
+        "intramuscular",
+        "intravenous",
+        "subcutaneous",
+        "intradermal",
+        "intrathecal",
+        "intraperitoneal",
+        "intra-articular",
+        "intraosseous",
+        "hemodialysis",
+        "urethral",
+        "intrauterine",
+        "intraocular",
+        "intravesical",
+        "topical",
+        "transdermal",
+        "ophthalmic",
+        "otic",
+        "nasal",
+        "vaginal",
+        "inhalation",
+        "nebulization",
+        "other",
+    ] = Field(
+        ...,
+        description="A route group, or `other` for a route outside every group. Absent from an identity when the route is unknown.",
+    )
+    method: Literal["judgement"]
+    certainty: Literal["certain", "likely", "unsure"] = Field(
+        ...,
+        description="How sure the model said it was. Only a `certain` judgement gives the route.",
+    )
+    model: Model
+    evidence: list[str] = Field(..., description="The words of the record the model quoted.")
+    reasoning: str = Field(..., description="Why the model named this route.")
 
 
 class Member(BaseModel):
@@ -1132,6 +1393,78 @@ class ScoredFactMember(BaseModel):
     )
     score: float = Field(
         ..., description="Score this member was ranked with when the field was decided."
+    )
+
+
+class Ingredient(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    system: str
+    code: str
+    display: str | None = None
+
+
+class DoseForm(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    system: str
+    code: str
+    display: str | None = None
+
+
+class MedicationIdentity(BaseModel):
+    """
+    What identifies a medication: its ingredients, its route, and for `other` the product's dose forms. Depending on how it was ingested, a medication is returned as its identity, codes, status and effective period, and leaves its dose, route text and dates on its members. Its `display` then reads as its identity, and it carries none when no identity was found.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    ingredients: list[Ingredient] = Field(
+        ...,
+        description="Each RxNorm ingredient, at its precise grain when it is given as a salt or ester, sorted by code.",
+    )
+    route: (
+        Literal[
+            "oral",
+            "rectal",
+            "sublingual",
+            "buccal",
+            "nasogastric",
+            "intramuscular",
+            "intravenous",
+            "subcutaneous",
+            "intradermal",
+            "intrathecal",
+            "intraperitoneal",
+            "intra-articular",
+            "intraosseous",
+            "hemodialysis",
+            "urethral",
+            "intrauterine",
+            "intraocular",
+            "intravesical",
+            "topical",
+            "transdermal",
+            "ophthalmic",
+            "otic",
+            "nasal",
+            "vaginal",
+            "inhalation",
+            "nebulization",
+            "other",
+        ]
+        | None
+    ) = Field(
+        None,
+        description="A route group, or `other` for a route outside every group. Absent from an identity when the route is unknown.",
+    )
+    dose_forms: list[DoseForm] | None = Field(
+        None,
+        alias="doseForms",
+        description="The product's RxNorm dose forms, sorted by code. Only for `other`, and absent when unknown.",
     )
 
 
@@ -1197,7 +1530,7 @@ class ExtractedNarrativeNode(BaseModel):
     type: Literal["extracted_narrative"]
     id: str = Field(
         ...,
-        description="Unique identifier for this node, as a prefixed node id (`{type}_{id}`, e.g. `ef_...`).",
+        description="Unique identifier for this node: its type's prefix, `_`, then the underlying id (e.g. `ef_...`).",
     )
     created_at: str = Field(
         ..., alias="createdAt", description="ISO 8601 timestamp when this node was first created."
@@ -1252,7 +1585,7 @@ class NarrativePassageNode(BaseModel):
     type: Literal["narrative_passage"]
     id: str = Field(
         ...,
-        description="Unique identifier for this node, as a prefixed node id (`{type}_{id}`, e.g. `ef_...`).",
+        description="Unique identifier for this node: its type's prefix, `_`, then the underlying id (e.g. `ef_...`).",
     )
     created_at: str = Field(
         ..., alias="createdAt", description="ISO 8601 timestamp when this node was first created."
@@ -1383,7 +1716,7 @@ class NarrativeNode(BaseModel):
     type: Literal["narrative"]
     id: str = Field(
         ...,
-        description="Unique identifier for this node, as a prefixed node id (`{type}_{id}`, e.g. `ef_...`).",
+        description="Unique identifier for this node: its type's prefix, `_`, then the underlying id (e.g. `ef_...`).",
     )
     created_at: str = Field(
         ..., alias="createdAt", description="ISO 8601 timestamp when this node was first created."
@@ -1426,7 +1759,7 @@ class LearnedMemoryNode(BaseModel):
     type: Literal["learned_memory"]
     id: str = Field(
         ...,
-        description="Unique identifier for this node, as a prefixed node id (`{type}_{id}`, e.g. `ef_...`).",
+        description="Unique identifier for this node: its type's prefix, `_`, then the underlying id (e.g. `ef_...`).",
     )
     created_at: str = Field(
         ..., alias="createdAt", description="ISO 8601 timestamp when this node was first created."
@@ -1439,7 +1772,7 @@ class LearnedMemoryNode(BaseModel):
     )
 
 
-class EffectivePeriod20(BaseModel):
+class EffectivePeriod14(BaseModel):
     """
     Temporal bounds of the event, for one that spans time rather than happening at an instant.
     """
@@ -1447,7 +1780,7 @@ class EffectivePeriod20(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    start: str | None = Field(None, description="ISO date when the event's span began.")
+    start: str | None = Field(None, description="ISO date when it began.")
     end: str | None = Field(None, description="ISO date when it ended.")
 
 
@@ -1492,16 +1825,17 @@ class Payload24(BaseModel):
         populate_by_name=True,
     )
     type: Literal["encounter"]
-    effective_period: EffectivePeriod20 | None = Field(
+    timestamp: str = Field(..., description="ISO 8601 timestamp when this clinical event occurred.")
+    effective_period: EffectivePeriod14 | None = Field(
         None,
         alias="effectivePeriod",
         description="Temporal bounds of the event, for one that spans time rather than happening at an instant.",
     )
     summary: str = Field(..., description="One-line description for display and timeline.")
-    ingestion_id: str | None = Field(
+    authored_at: str | None = Field(
         None,
-        alias="ingestionId",
-        description="Provenance: the ingestion request that introduced this event. Absent for a row written outside a run, which is every row predating the run model.",
+        alias="authoredAt",
+        description="ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time.",
     )
     kind: Literal["inpatient", "outpatient", "emergency", "virtual", "home", "unknown"] = Field(
         ...,
@@ -1514,10 +1848,22 @@ class Payload24(BaseModel):
     discharge_disposition: str | None = Field(
         None, alias="dischargeDisposition", description="Where the patient went after discharge."
     )
-    timestamp: str = Field(..., description="ISO 8601 timestamp when this clinical event occurred.")
+    planned_period: PlannedPeriod | None = Field(
+        None,
+        alias="plannedPeriod",
+        description="When it is intended to happen, as opposed to when it did: a scheduled encounter or procedure, the intended dosing or therapy span.",
+    )
+    status_changed_at: str | None = Field(
+        None, alias="statusChangedAt", description="ISO date when its status last changed."
+    )
     source: Source12 = Field(
         ...,
         description="Where this event was extracted from. Events are single-source — not merged across sources.",
+    )
+    ingestion_id: str | None = Field(
+        None,
+        alias="ingestionId",
+        description="Provenance: the ingestion request that introduced this event. Absent for a row written outside a run, which is every row predating the run model.",
     )
 
 
@@ -1530,16 +1876,17 @@ class Payload25(BaseModel):
         populate_by_name=True,
     )
     type: Literal["observation"]
-    effective_period: EffectivePeriod20 | None = Field(
+    timestamp: str = Field(..., description="ISO 8601 timestamp when this clinical event occurred.")
+    effective_period: EffectivePeriod14 | None = Field(
         None,
         alias="effectivePeriod",
         description="Temporal bounds of the event, for one that spans time rather than happening at an instant.",
     )
     summary: str = Field(..., description="One-line description for display and timeline.")
-    ingestion_id: str | None = Field(
+    authored_at: str | None = Field(
         None,
-        alias="ingestionId",
-        description="Provenance: the ingestion request that introduced this event. Absent for a row written outside a run, which is every row predating the run model.",
+        alias="authoredAt",
+        description="ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time.",
     )
     kind: (
         Literal[
@@ -1588,10 +1935,24 @@ class Payload25(BaseModel):
     status: Literal["final", "preliminary", "amended", "corrected", "cancelled", "unknown"] = Field(
         ..., description="Result status from Observation.status or DiagnosticReport.status."
     )
-    timestamp: str = Field(..., description="ISO 8601 timestamp when this clinical event occurred.")
+    occurred_at: str | None = Field(
+        None,
+        alias="occurredAt",
+        description="ISO date when it happened, for something that happened at a point in time.",
+    )
+    issued_at: str | None = Field(
+        None,
+        alias="issuedAt",
+        description="ISO date when the result was released, which comes after it was measured.",
+    )
     source: Source12 = Field(
         ...,
         description="Where this event was extracted from. Events are single-source — not merged across sources.",
+    )
+    ingestion_id: str | None = Field(
+        None,
+        alias="ingestionId",
+        description="Provenance: the ingestion request that introduced this event. Absent for a row written outside a run, which is every row predating the run model.",
     )
 
 
@@ -1604,16 +1965,17 @@ class Payload26(BaseModel):
         populate_by_name=True,
     )
     type: Literal["procedure"]
-    effective_period: EffectivePeriod20 | None = Field(
+    timestamp: str = Field(..., description="ISO 8601 timestamp when this clinical event occurred.")
+    effective_period: EffectivePeriod14 | None = Field(
         None,
         alias="effectivePeriod",
         description="Temporal bounds of the event, for one that spans time rather than happening at an instant.",
     )
     summary: str = Field(..., description="One-line description for display and timeline.")
-    ingestion_id: str | None = Field(
+    authored_at: str | None = Field(
         None,
-        alias="ingestionId",
-        description="Provenance: the ingestion request that introduced this event. Absent for a row written outside a run, which is every row predating the run model.",
+        alias="authoredAt",
+        description="ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time.",
     )
     codes: list[Code] | None = Field(
         None, description="Procedure codes from CPT, SNOMED-CT, or ICD PCS."
@@ -1630,10 +1992,27 @@ class Payload26(BaseModel):
             description="Procedure status. not-done covers CDA 'Procedure Refused'; aborted covers CDA 'Procedure Unsuccessful'.",
         )
     )
-    timestamp: str = Field(..., description="ISO 8601 timestamp when this clinical event occurred.")
+    occurred_at: str | None = Field(
+        None,
+        alias="occurredAt",
+        description="ISO date when it happened, for something that happened at a point in time.",
+    )
+    ordered_at: str | None = Field(
+        None, alias="orderedAt", description="ISO date when the drug or procedure was ordered."
+    )
+    planned_period: PlannedPeriod | None = Field(
+        None,
+        alias="plannedPeriod",
+        description="When it is intended to happen, as opposed to when it did: a scheduled encounter or procedure, the intended dosing or therapy span.",
+    )
     source: Source12 = Field(
         ...,
         description="Where this event was extracted from. Events are single-source — not merged across sources.",
+    )
+    ingestion_id: str | None = Field(
+        None,
+        alias="ingestionId",
+        description="Provenance: the ingestion request that introduced this event. Absent for a row written outside a run, which is every row predating the run model.",
     )
 
 
@@ -1655,16 +2034,17 @@ class Payload27(BaseModel):
         populate_by_name=True,
     )
     type: Literal["medication_event"]
-    effective_period: EffectivePeriod20 | None = Field(
+    timestamp: str = Field(..., description="ISO 8601 timestamp when this clinical event occurred.")
+    effective_period: EffectivePeriod14 | None = Field(
         None,
         alias="effectivePeriod",
         description="Temporal bounds of the event, for one that spans time rather than happening at an instant.",
     )
     summary: str = Field(..., description="One-line description for display and timeline.")
-    ingestion_id: str | None = Field(
+    authored_at: str | None = Field(
         None,
-        alias="ingestionId",
-        description="Provenance: the ingestion request that introduced this event. Absent for a row written outside a run, which is every row predating the run model.",
+        alias="authoredAt",
+        description="ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time.",
     )
     medication_display: str = Field(
         ...,
@@ -1685,17 +2065,48 @@ class Payload27(BaseModel):
         "unknown",
     ] = Field(
         ...,
-        description="Lifecycle step this event represents. \n        prescribed = MedicationRequest / CDA order written; \n        dispensed = MedicationDispense / pharmacy filled; \n        administered = MedicationAdministration / CDA single administration; \n        stopped = discontinued / CDA withdrawn; \n        refused = patient refused / CDA Medication Refused.",
+        description="Lifecycle step this event represents.\n        prescribed = MedicationRequest / CDA order written;\n        dispensed = MedicationDispense / pharmacy filled;\n        administered = MedicationAdministration / CDA single administration;\n        stopped = discontinued / CDA withdrawn;\n        refused = patient refused / CDA Medication Refused.",
     )
     dose: str | None = Field(
         None,
         description="Dosage instructions as a display string, e.g. '10 mg daily'. Includes CDA free-text SIG.",
     )
     route: str | None = Field(None, description="Route of administration, e.g. 'oral', 'IV'.")
-    timestamp: str = Field(..., description="ISO 8601 timestamp when this clinical event occurred.")
+    occurred_at: str | None = Field(
+        None,
+        alias="occurredAt",
+        description="ISO date when it happened, for something that happened at a point in time.",
+    )
+    prepared_at: str | None = Field(
+        None, alias="preparedAt", description="ISO date when the pharmacy prepared the dispense."
+    )
+    handed_over_at: str | None = Field(
+        None,
+        alias="handedOverAt",
+        description="ISO date when the pharmacy handed the drug over, which shows the patient actually received it.",
+    )
+    ordered_at: str | None = Field(
+        None, alias="orderedAt", description="ISO date when the drug or procedure was ordered."
+    )
+    planned_period: PlannedPeriod | None = Field(
+        None,
+        alias="plannedPeriod",
+        description="When it is intended to happen, as opposed to when it did: a scheduled encounter or procedure, the intended dosing or therapy span.",
+    )
+    order_valid_until: str | None = Field(
+        None, alias="orderValidUntil", description="ISO date until which the order may be filled."
+    )
+    status_changed_at: str | None = Field(
+        None, alias="statusChangedAt", description="ISO date when its status last changed."
+    )
     source: Source12 = Field(
         ...,
         description="Where this event was extracted from. Events are single-source — not merged across sources.",
+    )
+    ingestion_id: str | None = Field(
+        None,
+        alias="ingestionId",
+        description="Provenance: the ingestion request that introduced this event. Absent for a row written outside a run, which is every row predating the run model.",
     )
 
 
@@ -1710,7 +2121,7 @@ class ExtractedClinicalEventNode(BaseModel):
     type: Literal["extracted_clinical_event"]
     id: str = Field(
         ...,
-        description="Unique identifier for this node, as a prefixed node id (`{type}_{id}`, e.g. `ef_...`).",
+        description="Unique identifier for this node: its type's prefix, `_`, then the underlying id (e.g. `ef_...`).",
     )
     created_at: str = Field(
         ..., alias="createdAt", description="ISO 8601 timestamp when this node was first created."
@@ -1723,7 +2134,7 @@ class ExtractedClinicalEventNode(BaseModel):
     )
 
 
-class Evidence(BaseModel):
+class Evidence1(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -1731,7 +2142,7 @@ class Evidence(BaseModel):
     layer: Literal["source-ref-equality"]
 
 
-class Evidence1(BaseModel):
+class Evidence2(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -1751,7 +2162,7 @@ class Evidence1(BaseModel):
     )
 
 
-class Evidence2(BaseModel):
+class Evidence3(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -1775,7 +2186,7 @@ class Evidence2(BaseModel):
     )
 
 
-class Evidence3(BaseModel):
+class Evidence4(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -1794,104 +2205,62 @@ class Evidence3(BaseModel):
     code_b: str = Field(..., alias="codeB", description="The code from entity B.")
 
 
-class ConceptId(RootModel[str]):
-    root: str = Field(..., min_length=1)
-
-
 class PreciseConceptId(RootModel[str]):
     root: str = Field(..., min_length=1)
+
+
+class Member11(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    concept_id: str = Field(
+        ..., alias="conceptId", description="The base-ingredient concept id.", min_length=1
+    )
+    precise_concept_ids: list[PreciseConceptId] = Field(
+        ...,
+        alias="preciseConceptIds",
+        description="The salt/ester-grain concept ids this ingredient is given as. Empty when the match carries none.",
+    )
 
 
 class A(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    concept_ids: list[ConceptId] = Field(
+    members: list[Member11] = Field(
         ...,
-        alias="conceptIds",
-        description="The best candidate's base-ingredient concept ids — more than one for a combination product.",
+        description="The best candidate's members — more than one for a combination product.",
         min_length=1,
-    )
-    precise_concept_ids: list[PreciseConceptId] = Field(
-        ...,
-        alias="preciseConceptIds",
-        description="The best candidate's salt/ester-grain concept ids. Empty when the match carries no precise grain.",
     )
     rung: Literal["code", "crosswalk", "exact-name", "normalized-name"] = Field(
         ..., description="The cascade rung that grounded this side."
     )
     score: float = Field(..., ge=0.0, le=1.0)
     composition_id: str = Field(..., alias="compositionId", min_length=1)
+
+
+class Member12(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    concept_id: str = Field(
+        ..., alias="conceptId", description="The base-ingredient concept id.", min_length=1
+    )
+    precise_concept_ids: list[PreciseConceptId] = Field(
+        ...,
+        alias="preciseConceptIds",
+        description="The salt/ester-grain concept ids this ingredient is given as. Empty when the match carries none.",
+    )
 
 
 class B(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    concept_ids: list[ConceptId] = Field(
+    members: list[Member12] = Field(
         ...,
-        alias="conceptIds",
-        description="The best candidate's base-ingredient concept ids — more than one for a combination product.",
+        description="The best candidate's members — more than one for a combination product.",
         min_length=1,
-    )
-    precise_concept_ids: list[PreciseConceptId] = Field(
-        ...,
-        alias="preciseConceptIds",
-        description="The best candidate's salt/ester-grain concept ids. Empty when the match carries no precise grain.",
-    )
-    rung: Literal["code", "crosswalk", "exact-name", "normalized-name"] = Field(
-        ..., description="The cascade rung that grounded this side."
-    )
-    score: float = Field(..., ge=0.0, le=1.0)
-    composition_id: str = Field(..., alias="compositionId", min_length=1)
-
-
-class Evidence4(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    layer: Literal["concept-identity"]
-    a: A
-    b: B
-    kind: Literal["concept-identity-match"]
-
-
-class A1(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    concept_ids: list[ConceptId] = Field(
-        ...,
-        alias="conceptIds",
-        description="The best candidate's base-ingredient concept ids — more than one for a combination product.",
-        min_length=1,
-    )
-    precise_concept_ids: list[PreciseConceptId] = Field(
-        ...,
-        alias="preciseConceptIds",
-        description="The best candidate's salt/ester-grain concept ids. Empty when the match carries no precise grain.",
-    )
-    rung: Literal["code", "crosswalk", "exact-name", "normalized-name"] = Field(
-        ..., description="The cascade rung that grounded this side."
-    )
-    score: float = Field(..., ge=0.0, le=1.0)
-    composition_id: str = Field(..., alias="compositionId", min_length=1)
-
-
-class B1(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    concept_ids: list[ConceptId] = Field(
-        ...,
-        alias="conceptIds",
-        description="The best candidate's base-ingredient concept ids — more than one for a combination product.",
-        min_length=1,
-    )
-    precise_concept_ids: list[PreciseConceptId] = Field(
-        ...,
-        alias="preciseConceptIds",
-        description="The best candidate's salt/ester-grain concept ids. Empty when the match carries no precise grain.",
     )
     rung: Literal["code", "crosswalk", "exact-name", "normalized-name"] = Field(
         ..., description="The cascade rung that grounded this side."
@@ -1904,26 +2273,34 @@ class Evidence5(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    layer: Literal["concept-identity"]
-    a: A1
-    b: B1
-    kind: Literal["concept-identity-partial-match"]
+    layer: Literal["deterministic-code"]
+    a: A
+    b: B
+    kind: Literal["concept-identity-match"]
 
 
-class A2(BaseModel):
+class Member13(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    concept_ids: list[ConceptId] = Field(
-        ...,
-        alias="conceptIds",
-        description="The best candidate's base-ingredient concept ids — more than one for a combination product.",
-        min_length=1,
+    concept_id: str = Field(
+        ..., alias="conceptId", description="The base-ingredient concept id.", min_length=1
     )
     precise_concept_ids: list[PreciseConceptId] = Field(
         ...,
         alias="preciseConceptIds",
-        description="The best candidate's salt/ester-grain concept ids. Empty when the match carries no precise grain.",
+        description="The salt/ester-grain concept ids this ingredient is given as. Empty when the match carries none.",
+    )
+
+
+class A1(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    members: list[Member13] = Field(
+        ...,
+        description="The best candidate's members — more than one for a combination product.",
+        min_length=1,
     )
     rung: Literal["code", "crosswalk", "exact-name", "normalized-name"] = Field(
         ..., description="The cascade rung that grounded this side."
@@ -1932,20 +2309,28 @@ class A2(BaseModel):
     composition_id: str = Field(..., alias="compositionId", min_length=1)
 
 
-class B2(BaseModel):
+class Member14(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    concept_ids: list[ConceptId] = Field(
-        ...,
-        alias="conceptIds",
-        description="The best candidate's base-ingredient concept ids — more than one for a combination product.",
-        min_length=1,
+    concept_id: str = Field(
+        ..., alias="conceptId", description="The base-ingredient concept id.", min_length=1
     )
     precise_concept_ids: list[PreciseConceptId] = Field(
         ...,
         alias="preciseConceptIds",
-        description="The best candidate's salt/ester-grain concept ids. Empty when the match carries no precise grain.",
+        description="The salt/ester-grain concept ids this ingredient is given as. Empty when the match carries none.",
+    )
+
+
+class B1(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    members: list[Member14] = Field(
+        ...,
+        description="The best candidate's members — more than one for a combination product.",
+        min_length=1,
     )
     rung: Literal["code", "crosswalk", "exact-name", "normalized-name"] = Field(
         ..., description="The cascade rung that grounded this side."
@@ -1958,13 +2343,113 @@ class Evidence6(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    layer: Literal["concept-identity"]
+    layer: Literal["deterministic-code"]
+    a: A1
+    b: B1
+    kind: Literal["concept-identity-partial-match"]
+
+
+class Member15(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    concept_id: str = Field(
+        ..., alias="conceptId", description="The base-ingredient concept id.", min_length=1
+    )
+    precise_concept_ids: list[PreciseConceptId] = Field(
+        ...,
+        alias="preciseConceptIds",
+        description="The salt/ester-grain concept ids this ingredient is given as. Empty when the match carries none.",
+    )
+
+
+class A2(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    members: list[Member15] = Field(
+        ...,
+        description="The best candidate's members — more than one for a combination product.",
+        min_length=1,
+    )
+    rung: Literal["code", "crosswalk", "exact-name", "normalized-name"] = Field(
+        ..., description="The cascade rung that grounded this side."
+    )
+    score: float = Field(..., ge=0.0, le=1.0)
+    composition_id: str = Field(..., alias="compositionId", min_length=1)
+
+
+class Member16(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    concept_id: str = Field(
+        ..., alias="conceptId", description="The base-ingredient concept id.", min_length=1
+    )
+    precise_concept_ids: list[PreciseConceptId] = Field(
+        ...,
+        alias="preciseConceptIds",
+        description="The salt/ester-grain concept ids this ingredient is given as. Empty when the match carries none.",
+    )
+
+
+class B2(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    members: list[Member16] = Field(
+        ...,
+        description="The best candidate's members — more than one for a combination product.",
+        min_length=1,
+    )
+    rung: Literal["code", "crosswalk", "exact-name", "normalized-name"] = Field(
+        ..., description="The cascade rung that grounded this side."
+    )
+    score: float = Field(..., ge=0.0, le=1.0)
+    composition_id: str = Field(..., alias="compositionId", min_length=1)
+
+
+class Evidence7(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    layer: Literal["deterministic-code"]
     a: A2
     b: B2
     kind: Literal["concept-identity-mismatch"]
 
 
-class Evidence7(BaseModel):
+class Evidence8(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    layer: Literal["identity"]
+    a: MedicationIdentity
+    b: MedicationIdentity
+    kind: Literal["medication-identity-match"]
+
+
+class Evidence9(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    layer: Literal["identity"]
+    a: MedicationIdentity
+    b: MedicationIdentity
+    kind: Literal["medication-identity-mismatch"]
+
+
+class Evidence10(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    layer: Literal["identity"]
+    a: MedicationIdentity | None = None
+    b: MedicationIdentity | None = None
+    kind: Literal["medication-identity-incomplete"]
+
+
+class Evidence11(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -1990,7 +2475,7 @@ class Measurement(BaseModel):
     similarity: float = Field(..., ge=-1.0, le=1.0)
 
 
-class Evidence8(BaseModel):
+class Evidence12(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -2029,7 +2514,7 @@ class ModelSource1(BaseModel):
     )
 
 
-class Evidence9(BaseModel):
+class Evidence13(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -2045,7 +2530,7 @@ class Evidence9(BaseModel):
     model_source: ModelSource1 = Field(..., alias="modelSource")
 
 
-class Evidence10(BaseModel):
+class Evidence14(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         populate_by_name=True,
@@ -2059,7 +2544,7 @@ class Evidence10(BaseModel):
     match: Literal[False]
 
 
-class Evidence11(BaseModel):
+class Evidence15(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         populate_by_name=True,
@@ -2093,7 +2578,7 @@ class Conflict1(BaseModel):
     )
 
 
-class Evidence12(BaseModel):
+class Evidence16(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         populate_by_name=True,
@@ -2111,7 +2596,7 @@ class Evidence12(BaseModel):
     )
 
 
-class Evidence13(BaseModel):
+class Evidence17(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -2142,11 +2627,10 @@ class Payload28(BaseModel):
     rule_id: str = Field(
         ...,
         alias="ruleId",
-        description="Id of the stop rule that fired, e.g. 'corroborated-hierarchical-merge'. This is the audit's 'why'.",
+        description="Id of the stop rule that fired, e.g. 'deterministic-code-exact'. This is the audit's 'why'.",
     )
     evidence: list[
-        Evidence
-        | Evidence1
+        Evidence1
         | Evidence2
         | Evidence3
         | Evidence4
@@ -2159,6 +2643,10 @@ class Payload28(BaseModel):
         | Evidence11
         | Evidence12
         | Evidence13
+        | Evidence14
+        | Evidence15
+        | Evidence16
+        | Evidence17
     ] = Field(
         ...,
         description="The full accumulated evidence the rule evaluated, in the order the layers ran.",
@@ -2175,7 +2663,7 @@ class NodeRef(BaseModel):
     )
     id: str = Field(
         ...,
-        description="Id of the referenced node, as a prefixed node id (`{type}_{id}`, e.g. `ef_...`).",
+        description="Id of the referenced node: its type's prefix, `_`, then the underlying id (e.g. `ef_...`).",
     )
     type: Literal[
         "extracted_fact",
@@ -2199,7 +2687,7 @@ class ResolvesToEdge(BaseModel):
     type: Literal["resolves_to"]
     id: str = Field(
         ...,
-        description="Unique identifier for this edge, as a prefixed edge id (`{type}_{id}`, e.g. `rd_...`).",
+        description="Unique identifier for this edge: its type's prefix, `_`, then the underlying id (e.g. `rd_...`).",
     )
     created_at: str = Field(
         ..., alias="createdAt", description="ISO 8601 timestamp when this edge was first created."
@@ -2225,7 +2713,7 @@ class ChunkedIntoEdge(BaseModel):
     type: Literal["chunked_into"]
     id: str = Field(
         ...,
-        description="Unique identifier for this edge, as a prefixed edge id (`{type}_{id}`, e.g. `rd_...`).",
+        description="Unique identifier for this edge: its type's prefix, `_`, then the underlying id (e.g. `rd_...`).",
     )
     created_at: str = Field(
         ..., alias="createdAt", description="ISO 8601 timestamp when this edge was first created."
@@ -2275,7 +2763,7 @@ class RelationshipEdge(BaseModel):
     type: Literal["relationship"]
     id: str = Field(
         ...,
-        description="Unique identifier for this edge, as a prefixed edge id (`{type}_{id}`, e.g. `rd_...`).",
+        description="Unique identifier for this edge: its type's prefix, `_`, then the underlying id (e.g. `rd_...`).",
     )
     created_at: str = Field(
         ..., alias="createdAt", description="ISO 8601 timestamp when this edge was first created."
@@ -2288,18 +2776,6 @@ class RelationshipEdge(BaseModel):
     payload: Payload29 = Field(
         ..., description="Type-specific attributes of a `relationship` edge."
     )
-
-
-class ExtractedFactNodeList(BaseModel):
-    """
-    A page of `extracted_fact` nodes from the patient context graph.
-    """
-
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    data: list[ExtractedFactNode] = Field(..., description="The requested page of items.")
-    meta: Meta2 = Field(..., description="Pagination metadata for the returned page.")
 
 
 class ExtractedNarrativeNodeList(BaseModel):
@@ -2405,7 +2881,7 @@ class Datum(BaseModel):
     registry_key: str = Field(
         ...,
         alias="registryKey",
-        description="Caller-assigned identifier used in all REST API routes.",
+        description="The patient ID, used in every REST route, VFS path and MCP tool.",
     )
     patient: PatientDemographics | None
 
@@ -2458,6 +2934,27 @@ class IngestionIntakeItem(BaseModel):
     )
     received: int = Field(..., description="Items of `unit` this one carried.", ge=0)
     entries: list[Entry] = Field(..., description="Grouped by kind and outcome.")
+    session_id: str | None = Field(
+        None,
+        alias="sessionId",
+        description="Present on `message` items: the session the conversation was stored under — the `sessionId` it declared, or the one generated for it. Use it to continue the session or read its memories.",
+        min_length=1,
+    )
+
+
+class IngestSession(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    session_id: str | None = Field(
+        None,
+        alias="sessionId",
+        description="Id of the session these messages belong to. Omit it to open a new session under a generated id; send the same id again to continue that session.",
+        pattern="^[A-Za-z0-9][A-Za-z0-9.~:-]{0,127}$",
+    )
+    messages: list[IngestSessionsMessage] = Field(
+        ..., description="The messages, in chronological order.", min_length=1
+    )
 
 
 class SessionMemoryList(BaseModel):
@@ -2470,6 +2967,60 @@ class SessionMemoryList(BaseModel):
     )
     data: list[SessionMemory] = Field(..., description="The requested page of items.")
     meta: Meta2 = Field(..., description="Pagination metadata for the returned page.")
+
+
+class MedicationRouteDecision(BaseModel):
+    """
+    How a medication record's route was decided: `route` is the route it was given, absent when no step placed it, and `evidence` holds every step's decision. Depending on how it was ingested, a medication record carries it.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    route: (
+        Literal[
+            "oral",
+            "rectal",
+            "sublingual",
+            "buccal",
+            "nasogastric",
+            "intramuscular",
+            "intravenous",
+            "subcutaneous",
+            "intradermal",
+            "intrathecal",
+            "intraperitoneal",
+            "intra-articular",
+            "intraosseous",
+            "hemodialysis",
+            "urethral",
+            "intrauterine",
+            "intraocular",
+            "intravesical",
+            "topical",
+            "transdermal",
+            "ophthalmic",
+            "otic",
+            "nasal",
+            "vaginal",
+            "inhalation",
+            "nebulization",
+            "other",
+        ]
+        | None
+    ) = Field(
+        None,
+        description="A route group, or `other` for a route outside every group. Absent from an identity when the route is unknown.",
+    )
+    evidence: list[
+        MedicationRouteEvidence1
+        | MedicationRouteEvidence2
+        | MedicationRouteEvidence3
+        | MedicationRouteEvidence4
+    ] = Field(
+        ...,
+        description="Every decision the steps made about the route, in the order the steps ran.",
+    )
 
 
 class ConflictItem(ScoredFactMember):
@@ -2508,7 +3059,7 @@ class ResolutionDecisionEdge(BaseModel):
     type: Literal["resolution_decision"]
     id: str = Field(
         ...,
-        description="Unique identifier for this edge, as a prefixed edge id (`{type}_{id}`, e.g. `rd_...`).",
+        description="Unique identifier for this edge: its type's prefix, `_`, then the underlying id (e.g. `rd_...`).",
     )
     created_at: str = Field(
         ..., alias="createdAt", description="ISO 8601 timestamp when this edge was first created."
@@ -2579,6 +3130,21 @@ class Ingestion(BaseModel):
     )
 
 
+class IngestSessionsBody(BaseModel):
+    """
+    One or more sessions to import.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    sessions: list[IngestSession] = Field(
+        ...,
+        description="Sessions to import. `intake` comes back index-aligned with this list.",
+        min_length=1,
+    )
+
+
 class IngestionList(BaseModel):
     """
     A page of submissions for this patient.
@@ -2589,6 +3155,109 @@ class IngestionList(BaseModel):
     )
     data: list[Ingestion] = Field(..., description="The requested page of items.")
     meta: Meta2 = Field(..., description="Pagination metadata for the returned page.")
+
+
+class Payload1(BaseModel):
+    """
+    Type-specific attributes of an `extracted_fact` node.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    display: str = Field(
+        ..., description="Human-readable label — condition name, drug name, vaccine name, etc."
+    )
+    codes: list[Code] | None = Field(
+        None,
+        description="Clinical codes for this fact (SNOMED, ICD-10, RxNorm, CVX…). More than one when multiple coding systems apply.",
+    )
+    authored_at: str | None = Field(
+        None,
+        alias="authoredAt",
+        description="ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time.",
+    )
+    type: Literal["medication"]
+    status: Literal["active", "on-hold", "completed", "discontinued", "unknown"] = Field(
+        ...,
+        description="Current regimen status. active = currently taking; on-hold = temporarily paused; completed = full course finished as planned; discontinued = stopped early or cancelled; unknown = indeterminate.",
+    )
+    dosage_instructions: str | None = Field(
+        None,
+        alias="dosageInstructions",
+        description="Free-text dosage instructions from MedicationStatement.dosage[].additionalInstruction[].text, e.g. 'Take 1 tablet by mouth daily for hypertension.'",
+    )
+    route: str | None = Field(
+        None,
+        description="Route of administration from dosage[].route, e.g. 'Oral', 'IV', 'Topical'.",
+    )
+    effective_period: EffectivePeriod | None = Field(
+        None,
+        alias="effectivePeriod",
+        description="When the fact held: `start` is when it became active, `end` when it ended or was resolved.",
+    )
+    prepared_at: str | None = Field(
+        None, alias="preparedAt", description="ISO date when the pharmacy prepared the dispense."
+    )
+    handed_over_at: str | None = Field(
+        None,
+        alias="handedOverAt",
+        description="ISO date when the pharmacy handed the drug over, which shows the patient actually received it.",
+    )
+    ordered_at: str | None = Field(
+        None, alias="orderedAt", description="ISO date when the drug or procedure was ordered."
+    )
+    planned_period: PlannedPeriod | None = Field(
+        None,
+        alias="plannedPeriod",
+        description="When it is intended to happen, as opposed to when it did: a scheduled encounter or procedure, the intended dosing or therapy span.",
+    )
+    order_valid_until: str | None = Field(
+        None, alias="orderValidUntil", description="ISO date until which the order may be filled."
+    )
+    asserted_at: str | None = Field(
+        None,
+        alias="assertedAt",
+        description="ISO date when a clinician stated it held. Shows it held then, not when it started.",
+    )
+    route_decision: MedicationRouteDecision | None = Field(None, alias="routeDecision")
+    source: Source1 = Field(..., description="Where this fact was extracted from.")
+    ingestion_id: str = Field(
+        ..., alias="ingestionId", description="The ingestion request that introduced this row."
+    )
+
+
+class ExtractedFactNode(BaseModel):
+    """
+    An `extracted_fact` node in the patient context graph.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Literal["extracted_fact"]
+    id: str = Field(
+        ...,
+        description="Unique identifier for this node: its type's prefix, `_`, then the underlying id (e.g. `ef_...`).",
+    )
+    created_at: str = Field(
+        ..., alias="createdAt", description="ISO 8601 timestamp when this node was first created."
+    )
+    updated_at: str = Field(
+        ..., alias="updatedAt", description="ISO 8601 timestamp when this node was last updated."
+    )
+    payload: (
+        Payload
+        | Payload1
+        | Payload2
+        | Payload3
+        | Payload4
+        | Payload5
+        | Payload6
+        | Payload7
+        | Payload8
+        | Payload9
+    ) = Field(..., description="Type-specific attributes of an `extracted_fact` node.")
 
 
 class Payload10(BaseModel):
@@ -2606,22 +3275,28 @@ class Payload10(BaseModel):
         None,
         description="Clinical codes for this fact (SNOMED, ICD-10, RxNorm, CVX…). More than one when multiple coding systems apply.",
     )
-    date: str | None = Field(
+    authored_at: str | None = Field(
         None,
-        description="ISO date when this fact was recorded or last updated in the source system.",
-    )
-    effective_period: EffectivePeriod | None = Field(
-        None, alias="effectivePeriod", description="Temporal bounds of the fact's validity."
+        alias="authoredAt",
+        description="ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time.",
     )
     type: Literal["condition"]
+    effective_period: EffectivePeriod | None = Field(
+        None,
+        alias="effectivePeriod",
+        description="When the fact held: `start` is when it became active, `end` when it ended or was resolved.",
+    )
     status: Literal["active", "resolved", "inactive", "unknown"] = Field(
         ...,
         description="Clinical status of the condition. active = currently present; resolved = no longer present; inactive = present but not actively managed.",
     )
-    onset_date: str | None = Field(
+    asserted_at: str | None = Field(
         None,
-        alias="onsetDate",
-        description="ISO date when the condition first started, from Condition.onsetPeriod.start or onsetDateTime.",
+        alias="assertedAt",
+        description="ISO date when a clinician stated it held. Shows it held then, not when it started.",
+    )
+    status_changed_at: str | None = Field(
+        None, alias="statusChangedAt", description="ISO date when its status last changed."
     )
     members: list[Member] = Field(
         ..., description="Every extracted fact this fact was projected from."
@@ -2644,12 +3319,10 @@ class Payload11(BaseModel):
         None,
         description="Clinical codes for this fact (SNOMED, ICD-10, RxNorm, CVX…). More than one when multiple coding systems apply.",
     )
-    date: str | None = Field(
+    authored_at: str | None = Field(
         None,
-        description="ISO date when this fact was recorded or last updated in the source system.",
-    )
-    effective_period: EffectivePeriod | None = Field(
-        None, alias="effectivePeriod", description="Temporal bounds of the fact's validity."
+        alias="authoredAt",
+        description="ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time.",
     )
     type: Literal["medication"]
     status: Literal["active", "on-hold", "completed", "discontinued", "unknown"] = Field(
@@ -2665,6 +3338,36 @@ class Payload11(BaseModel):
         None,
         description="Route of administration from dosage[].route, e.g. 'Oral', 'IV', 'Topical'.",
     )
+    effective_period: EffectivePeriod | None = Field(
+        None,
+        alias="effectivePeriod",
+        description="When the fact held: `start` is when it became active, `end` when it ended or was resolved.",
+    )
+    prepared_at: str | None = Field(
+        None, alias="preparedAt", description="ISO date when the pharmacy prepared the dispense."
+    )
+    handed_over_at: str | None = Field(
+        None,
+        alias="handedOverAt",
+        description="ISO date when the pharmacy handed the drug over, which shows the patient actually received it.",
+    )
+    ordered_at: str | None = Field(
+        None, alias="orderedAt", description="ISO date when the drug or procedure was ordered."
+    )
+    planned_period: PlannedPeriod | None = Field(
+        None,
+        alias="plannedPeriod",
+        description="When it is intended to happen, as opposed to when it did: a scheduled encounter or procedure, the intended dosing or therapy span.",
+    )
+    order_valid_until: str | None = Field(
+        None, alias="orderValidUntil", description="ISO date until which the order may be filled."
+    )
+    asserted_at: str | None = Field(
+        None,
+        alias="assertedAt",
+        description="ISO date when a clinician stated it held. Shows it held then, not when it started.",
+    )
+    identity: MedicationIdentity | None = None
     members: list[Member] = Field(
         ..., description="Every extracted fact this fact was projected from."
     )
@@ -2686,12 +3389,10 @@ class Payload12(BaseModel):
         None,
         description="Clinical codes for this fact (SNOMED, ICD-10, RxNorm, CVX…). More than one when multiple coding systems apply.",
     )
-    date: str | None = Field(
+    authored_at: str | None = Field(
         None,
-        description="ISO date when this fact was recorded or last updated in the source system.",
-    )
-    effective_period: EffectivePeriod | None = Field(
-        None, alias="effectivePeriod", description="Temporal bounds of the fact's validity."
+        alias="authoredAt",
+        description="ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time.",
     )
     type: Literal["allergy"]
     status: Literal["active", "inactive", "entered-in-error"] = Field(
@@ -2709,6 +3410,21 @@ class Payload12(BaseModel):
     reactions: list[str] | None = Field(
         None,
         description="Observed reaction manifestations as display strings from reaction[].manifestation, e.g. ['Swelling', 'Anaphylaxis'].",
+    )
+    effective_period: EffectivePeriod | None = Field(
+        None,
+        alias="effectivePeriod",
+        description="When the fact held: `start` is when it became active, `end` when it ended or was resolved.",
+    )
+    reaction_periods: list[ReactionPeriod] | None = Field(
+        None,
+        alias="reactionPeriods",
+        description="When each recorded reaction to the substance or vaccine started and ended.",
+    )
+    last_reaction_at: str | None = Field(
+        None,
+        alias="lastReactionAt",
+        description="ISO date of the most recent known reaction to the substance.",
     )
     members: list[Member] = Field(
         ..., description="Every extracted fact this fact was projected from."
@@ -2731,12 +3447,10 @@ class Payload13(BaseModel):
         None,
         description="Clinical codes for this fact (SNOMED, ICD-10, RxNorm, CVX…). More than one when multiple coding systems apply.",
     )
-    date: str | None = Field(
+    authored_at: str | None = Field(
         None,
-        description="ISO date when this fact was recorded or last updated in the source system.",
-    )
-    effective_period: EffectivePeriod | None = Field(
-        None, alias="effectivePeriod", description="Temporal bounds of the fact's validity."
+        alias="authoredAt",
+        description="ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time.",
     )
     type: Literal["family_history"]
     relationship: str = Field(
@@ -2749,6 +3463,15 @@ class Payload13(BaseModel):
     conditions: list[Condition] = Field(
         ...,
         description="Health conditions recorded for this relative from FamilyMemberHistory.condition[].",
+    )
+    birth_date: str | None = Field(
+        None, alias="birthDate", description="ISO date when the relative was born."
+    )
+    death: str | float | None = Field(
+        None, description="When the relative died: an ISO date, or their age in years at death."
+    )
+    age: str | float | None = Field(
+        None, description="The relative's age: in years, or as the source states it."
     )
     members: list[Member] = Field(
         ..., description="Every extracted fact this fact was projected from."
@@ -2771,12 +3494,10 @@ class Payload14(BaseModel):
         None,
         description="Clinical codes for this fact (SNOMED, ICD-10, RxNorm, CVX…). More than one when multiple coding systems apply.",
     )
-    date: str | None = Field(
+    authored_at: str | None = Field(
         None,
-        description="ISO date when this fact was recorded or last updated in the source system.",
-    )
-    effective_period: EffectivePeriod | None = Field(
-        None, alias="effectivePeriod", description="Temporal bounds of the fact's validity."
+        alias="authoredAt",
+        description="ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time.",
     )
     type: Literal["social_history"]
     category: str | None = Field(
@@ -2786,6 +3507,21 @@ class Payload14(BaseModel):
     value: str | None = Field(
         None,
         description="Current state as a string from Observation.valueString or valueCodeableConcept.text, e.g. 'Smokeless tobacco non-user', 'Current every day smoker'.",
+    )
+    effective_period: EffectivePeriod | None = Field(
+        None,
+        alias="effectivePeriod",
+        description="When the fact held: `start` is when it became active, `end` when it ended or was resolved.",
+    )
+    occurred_at: str | None = Field(
+        None,
+        alias="occurredAt",
+        description="ISO date when it happened, for something that happened at a point in time.",
+    )
+    issued_at: str | None = Field(
+        None,
+        alias="issuedAt",
+        description="ISO date when the result was released, which comes after it was measured.",
     )
     members: list[Member] = Field(
         ..., description="Every extracted fact this fact was projected from."
@@ -2808,22 +3544,38 @@ class Payload15(BaseModel):
         None,
         description="Clinical codes for this fact (SNOMED, ICD-10, RxNorm, CVX…). More than one when multiple coding systems apply.",
     )
-    date: str | None = Field(
+    authored_at: str | None = Field(
         None,
-        description="ISO date when this fact was recorded or last updated in the source system.",
-    )
-    effective_period: EffectivePeriod | None = Field(
-        None, alias="effectivePeriod", description="Temporal bounds of the fact's validity."
+        alias="authoredAt",
+        description="ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time.",
     )
     type: Literal["immunization"]
     status: Literal["completed", "not-done"] = Field(
         ...,
         description="Administration status from Immunization.status. HG provides individual shot records — each administered vaccine is its own Fact, not a rolled-up series status.",
     )
-    occurrence_date: str | None = Field(
+    occurred_at: str | None = Field(
         None,
-        alias="occurrenceDate",
+        alias="occurredAt",
         description="ISO date when the vaccine was administered, from Immunization.occurrenceDateTime.",
+    )
+    reaction_periods: list[ReactionPeriod] | None = Field(
+        None,
+        alias="reactionPeriods",
+        description="When each recorded reaction to the substance or vaccine started and ended.",
+    )
+    expires_at: str | None = Field(
+        None, alias="expiresAt", description="ISO date when the vaccine lot or device expires."
+    )
+    info_published_at: str | None = Field(
+        None,
+        alias="infoPublishedAt",
+        description="ISO date when the vaccine information statement was published.",
+    )
+    info_presented_at: str | None = Field(
+        None,
+        alias="infoPresentedAt",
+        description="ISO date when the vaccine information statement was given to the patient.",
     )
     members: list[Member] = Field(
         ..., description="Every extracted fact this fact was projected from."
@@ -2846,17 +3598,26 @@ class Payload16(BaseModel):
         None,
         description="Clinical codes for this fact (SNOMED, ICD-10, RxNorm, CVX…). More than one when multiple coding systems apply.",
     )
-    date: str | None = Field(
+    authored_at: str | None = Field(
         None,
-        description="ISO date when this fact was recorded or last updated in the source system.",
-    )
-    effective_period: EffectivePeriod | None = Field(
-        None, alias="effectivePeriod", description="Temporal bounds of the fact's validity."
+        alias="authoredAt",
+        description="ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time.",
     )
     type: Literal["device"]
     status: Literal["active", "inactive", "entered-in-error", "unknown"] = Field(
         ...,
         description="Whether the device is currently in use. active = currently implanted or in active use; inactive = removed or no longer used; unknown = not reported by the source.",
+    )
+    effective_period: EffectivePeriod | None = Field(
+        None,
+        alias="effectivePeriod",
+        description="When the fact held: `start` is when it became active, `end` when it ended or was resolved.",
+    )
+    manufactured_at: str | None = Field(
+        None, alias="manufacturedAt", description="ISO date when the device was made."
+    )
+    expires_at: str | None = Field(
+        None, alias="expiresAt", description="ISO date when the vaccine lot or device expires."
     )
     members: list[Member] = Field(
         ..., description="Every extracted fact this fact was projected from."
@@ -2879,18 +3640,20 @@ class Payload17(BaseModel):
         None,
         description="Clinical codes for this fact (SNOMED, ICD-10, RxNorm, CVX…). More than one when multiple coding systems apply.",
     )
-    date: str | None = Field(
+    authored_at: str | None = Field(
         None,
-        description="ISO date when this fact was recorded or last updated in the source system.",
-    )
-    effective_period: EffectivePeriod | None = Field(
-        None, alias="effectivePeriod", description="Temporal bounds of the fact's validity."
+        alias="authoredAt",
+        description="ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time.",
     )
     type: Literal["demographic"]
     birth_date: str | None = Field(
         None,
         alias="birthDate",
         description="Patient date of birth in ISO format (YYYY-MM-DD), from Patient.birthDate.",
+    )
+    death: str | float | None = Field(
+        None,
+        description="When the patient died: an ISO date from Patient.deceasedDateTime, or their age in years at death.",
     )
     sex: str | None = Field(
         None, description="Administrative sex from Patient.gender, e.g. 'male', 'female'."
@@ -2920,12 +3683,10 @@ class Payload18(BaseModel):
         None,
         description="Clinical codes for this fact (SNOMED, ICD-10, RxNorm, CVX…). More than one when multiple coding systems apply.",
     )
-    date: str | None = Field(
+    authored_at: str | None = Field(
         None,
-        description="ISO date when this fact was recorded or last updated in the source system.",
-    )
-    effective_period: EffectivePeriod | None = Field(
-        None, alias="effectivePeriod", description="Temporal bounds of the fact's validity."
+        alias="authoredAt",
+        description="ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time.",
     )
     type: Literal["insurance"]
     status: Literal["active", "cancelled", "draft", "entered-in-error"] = Field(
@@ -2938,6 +3699,11 @@ class Payload18(BaseModel):
     )
     member_id: str | None = Field(
         None, alias="memberId", description="Member identifier from Coverage.identifier[].value."
+    )
+    effective_period: EffectivePeriod | None = Field(
+        None,
+        alias="effectivePeriod",
+        description="When the fact held: `start` is when it became active, `end` when it ended or was resolved.",
     )
     members: list[Member] = Field(
         ..., description="Every extracted fact this fact was projected from."
@@ -2960,12 +3726,10 @@ class Payload19(BaseModel):
         None,
         description="Clinical codes for this fact (SNOMED, ICD-10, RxNorm, CVX…). More than one when multiple coding systems apply.",
     )
-    date: str | None = Field(
+    authored_at: str | None = Field(
         None,
-        description="ISO date when this fact was recorded or last updated in the source system.",
-    )
-    effective_period: EffectivePeriod | None = Field(
-        None, alias="effectivePeriod", description="Temporal bounds of the fact's validity."
+        alias="authoredAt",
+        description="ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time.",
     )
     type: Literal["directive"]
     status: Literal["active", "void", "entered-in-error"] = Field(
@@ -2975,6 +3739,19 @@ class Payload19(BaseModel):
     notes: str | None = Field(
         None,
         description="Directive content extracted from the source document (e.g. living will, POLST). HG delivers these as PDFs rather than structured Consent resources.",
+    )
+    effective_period: EffectivePeriod | None = Field(
+        None,
+        alias="effectivePeriod",
+        description="When the fact held: `start` is when it became active, `end` when it ended or was resolved.",
+    )
+    signed_at: str | None = Field(
+        None, alias="signedAt", description="ISO date when the patient agreed to or signed it."
+    )
+    verified_at: str | None = Field(
+        None,
+        alias="verifiedAt",
+        description="ISO date when someone last confirmed it is still valid.",
     )
     members: list[Member] = Field(
         ..., description="Every extracted fact this fact was projected from."
@@ -2993,7 +3770,7 @@ class FactNode(BaseModel):
     type: Literal["fact"]
     id: str = Field(
         ...,
-        description="Unique identifier for this node, as a prefixed node id (`{type}_{id}`, e.g. `ef_...`).",
+        description="Unique identifier for this node: its type's prefix, `_`, then the underlying id (e.g. `ef_...`).",
     )
     created_at: str = Field(
         ..., alias="createdAt", description="ISO 8601 timestamp when this node was first created."
@@ -3029,6 +3806,18 @@ class EdgeList(BaseModel):
             Field(discriminator="type"),
         ]
     ] = Field(..., description="The requested page of items.")
+    meta: Meta2 = Field(..., description="Pagination metadata for the returned page.")
+
+
+class ExtractedFactNodeList(BaseModel):
+    """
+    A page of `extracted_fact` nodes from the patient context graph.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    data: list[ExtractedFactNode] = Field(..., description="The requested page of items.")
     meta: Meta2 = Field(..., description="Pagination metadata for the returned page.")
 
 

@@ -32,7 +32,7 @@ class PatientsResource:
     def list_patients(self, *, page: int | None = None, per_page: int | None = None) -> PatientList:
         """List patients.
 
-        Returns a page of the patients currently registered, ordered by registry key. An empty
+        Returns a page of the patients currently registered, ordered by patient ID. An empty
         page is returned if none have been registered yet. Graph counts are read per patient
         from the graph endpoints.
         """
@@ -46,8 +46,8 @@ class PatientsResource:
     def get_patient(self, patient_id: str) -> PatientDetail:
         """Get patient.
 
-        Returns demographic metadata and pipeline stats for a patient identified by its registry
-        key.
+        Returns demographic metadata and pipeline stats for a patient identified by its patient
+        ID.
         """
         return self._http.request(
             "GET",
@@ -107,7 +107,7 @@ class PatientsResource:
         """Upsert patient.
 
         Creates the patient entry if it does not yet exist, or returns the existing record
-        unchanged. Fully idempotent — safe to call before or after the first ingest.
+        unchanged. Idempotent.
 
         New ids are limited to `[A-Za-z0-9][A-Za-z0-9.~:-]{0,127}`, but you can keep referring
         to previous ids as they were defined.
@@ -129,7 +129,7 @@ class AsyncPatientsResource:
     ) -> PatientList:
         """List patients.
 
-        Returns a page of the patients currently registered, ordered by registry key. An empty
+        Returns a page of the patients currently registered, ordered by patient ID. An empty
         page is returned if none have been registered yet. Graph counts are read per patient
         from the graph endpoints.
         """
@@ -143,8 +143,8 @@ class AsyncPatientsResource:
     async def get_patient(self, patient_id: str) -> PatientDetail:
         """Get patient.
 
-        Returns demographic metadata and pipeline stats for a patient identified by its registry
-        key.
+        Returns demographic metadata and pipeline stats for a patient identified by its patient
+        ID.
         """
         return await self._http.request(
             "GET",
@@ -204,7 +204,7 @@ class AsyncPatientsResource:
         """Upsert patient.
 
         Creates the patient entry if it does not yet exist, or returns the existing record
-        unchanged. Fully idempotent — safe to call before or after the first ingest.
+        unchanged. Idempotent.
 
         New ids are limited to `[A-Za-z0-9][A-Za-z0-9.~:-]{0,127}`, but you can keep referring
         to previous ids as they were defined.

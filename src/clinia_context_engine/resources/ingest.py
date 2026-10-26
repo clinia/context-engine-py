@@ -8,7 +8,7 @@ from typing import Any, Literal
 from pydantic import TypeAdapter
 
 from .._http import AsyncHttpClient, HttpClient
-from ..generated.models import IngestFhirBody, Ingestion, IngestionList
+from ..generated.models import IngestFhirBody, Ingestion, IngestionList, IngestSessionsBody
 
 _INGESTION: TypeAdapter[Ingestion] = TypeAdapter(Ingestion)
 _INGESTION_LIST: TypeAdapter[IngestionList] = TypeAdapter(IngestionList)
@@ -115,6 +115,33 @@ class IngestResource:
             cast_to=_INGESTION,
         )
 
+    def ingest_sessions(
+        self, patient_id: str, body: IngestSessionsBody | dict[str, Any]
+    ) -> Ingestion:
+        """Ingest sessions.
+
+        Submits one or more conversation transcripts. Each transcript is stored as a session —
+        under the `sessionId` it declares, or a generated one — and the patient's memories are
+        formed from it as ingestion proceeds.
+
+        The response is a receipt: ingestion continues after it is returned, so poll the
+        ingestion to follow it. `intake` comes back index-aligned with the sessions you sent,
+        each item naming the session its transcript was stored under.
+
+        Resending a session under the same `sessionId` is safe: messages already stored are
+        recognised and not staged again, and turns added at the end are appended. A transcript
+        without a `sessionId` always opens a new session. A transcript that edits, removes or
+        reorders stored turns is refused. If any transcript is refused, the whole request is
+        rejected and nothing is stored.
+        """
+        return self._http.request(
+            "POST",
+            "/v1/patients/{patientId}/ingestions/sessions",
+            path_params={"patientId": patient_id},
+            json=body,
+            cast_to=_INGESTION,
+        )
+
 
 class AsyncIngestResource:
     def __init__(self, http: AsyncHttpClient) -> None:
@@ -218,5 +245,32 @@ class AsyncIngestResource:
             path_params={"patientId": patient_id},
             content=content,
             content_type="application/cda+xml",
+            cast_to=_INGESTION,
+        )
+
+    async def ingest_sessions(
+        self, patient_id: str, body: IngestSessionsBody | dict[str, Any]
+    ) -> Ingestion:
+        """Ingest sessions.
+
+        Submits one or more conversation transcripts. Each transcript is stored as a session —
+        under the `sessionId` it declares, or a generated one — and the patient's memories are
+        formed from it as ingestion proceeds.
+
+        The response is a receipt: ingestion continues after it is returned, so poll the
+        ingestion to follow it. `intake` comes back index-aligned with the sessions you sent,
+        each item naming the session its transcript was stored under.
+
+        Resending a session under the same `sessionId` is safe: messages already stored are
+        recognised and not staged again, and turns added at the end are appended. A transcript
+        without a `sessionId` always opens a new session. A transcript that edits, removes or
+        reorders stored turns is refused. If any transcript is refused, the whole request is
+        rejected and nothing is stored.
+        """
+        return await self._http.request(
+            "POST",
+            "/v1/patients/{patientId}/ingestions/sessions",
+            path_params={"patientId": patient_id},
+            json=body,
             cast_to=_INGESTION,
         )

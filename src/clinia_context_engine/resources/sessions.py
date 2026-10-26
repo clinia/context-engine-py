@@ -8,7 +8,7 @@ from typing import Any, Literal
 from pydantic import TypeAdapter
 
 from .._http import AsyncHttpClient, HttpClient
-from ..generated.models import AppendMessagesBody, IngestSessionBody, Session, SessionMemoryList
+from ..generated.models import AppendMessagesBody, Session, SessionMemoryList
 
 _SESSION: TypeAdapter[Session] = TypeAdapter(Session)
 _SESSION_MEMORY_LIST: TypeAdapter[SessionMemoryList] = TypeAdapter(SessionMemoryList)
@@ -47,6 +47,11 @@ class SessionsResource:
 
         Opens a new query session scoped to a patient. Sessions track interaction context across
         multiple MCP tool calls within a single agent run.
+
+        Deprecated: a session no longer needs opening. Writing under a `sessionId` of your
+        choosing — appending messages, a tool call's `session_id`, or `POST
+        …/ingestions/sessions` — creates it, and the import route generates one when a
+        transcript declares none.
         """
         return self._http.request(
             "POST",
@@ -76,6 +81,9 @@ class SessionsResource:
 
         New ids are limited to `[A-Za-z0-9][A-Za-z0-9.~:-]{0,127}`, but you can keep referring
         to previous ids as they were defined.
+
+        Deprecated: a session no longer needs opening. Its first write — appending messages, a
+        tool call's `session_id`, or `POST …/ingestions/sessions` — creates it.
         """
         return self._http.request(
             "PUT",
@@ -89,8 +97,16 @@ class SessionsResource:
     ) -> dict[str, Any]:
         """Append session messages.
 
-        Appends user/assistant messages to an open session, in order. The session stays open.
-        Tool-call turns are recorded separately by the MCP layer and are not accepted here.
+        Appends user/assistant messages to a session, in order, creating the session if this is
+        its first write, and queues memory formation over them. The returned `ingestion` is the
+        receipt to poll. Tool-call turns are recorded separately by the MCP layer and are not
+        accepted here.
+
+        New ids are limited to `[A-Za-z0-9][A-Za-z0-9.~:-]{0,127}`, but you can keep referring
+        to previous ids as they were defined.
+
+        Deprecated: use `POST …/ingestions/sessions`, which accepts the same messages under the
+        session's id.
         """
         return self._http.request(
             "POST",
@@ -103,34 +119,16 @@ class SessionsResource:
     def generate_memories(self, patient_id: str, session_id: str) -> dict[str, Any]:
         """Generate session memories.
 
-        Extracts memories from messages appended since the last run and infers memory↔fact
-        relationships. The session stays active and can keep receiving messages. Append-only: it
-        never re-extracts messages already covered by a prior run, so re-running it only adds
-        memories for what's new, but it does not deduplicate against memories from a previous
-        run. Call it intentionally rather than on every turn.
+        Accepts and does nothing: memories form from a session's messages as they arrive,
+        through appending messages or `POST …/ingestions/sessions`, each of which returns the
+        ingestion receipt to poll. `GET …/memories` returns a session's memories as they land.
+
+        Deprecated: drop the call.
         """
         return self._http.request(
             "POST",
             "/v1/patients/{patientId}/sessions/{sessionId}/memories",
             path_params={"patientId": patient_id, "sessionId": session_id},
-            cast_to=_DICT,
-        )
-
-    def ingest_session(
-        self, patient_id: str, body: IngestSessionBody | dict[str, Any]
-    ) -> dict[str, Any]:
-        """Ingest a complete session.
-
-        Replays a complete set of messages as one session: creates the session, appends every
-        message in order, then generates memories from it synchronously, so the response returns
-        only after the patient's memories reflect the conversation. Messages can still be
-        appended to the session. Intended for batch/replay use, not interactive sessions.
-        """
-        return self._http.request(
-            "POST",
-            "/v1/patients/{patientId}/sessions/ingest",
-            path_params={"patientId": patient_id},
-            json=body,
             cast_to=_DICT,
         )
 
@@ -167,6 +165,11 @@ class AsyncSessionsResource:
 
         Opens a new query session scoped to a patient. Sessions track interaction context across
         multiple MCP tool calls within a single agent run.
+
+        Deprecated: a session no longer needs opening. Writing under a `sessionId` of your
+        choosing — appending messages, a tool call's `session_id`, or `POST
+        …/ingestions/sessions` — creates it, and the import route generates one when a
+        transcript declares none.
         """
         return await self._http.request(
             "POST",
@@ -196,6 +199,9 @@ class AsyncSessionsResource:
 
         New ids are limited to `[A-Za-z0-9][A-Za-z0-9.~:-]{0,127}`, but you can keep referring
         to previous ids as they were defined.
+
+        Deprecated: a session no longer needs opening. Its first write — appending messages, a
+        tool call's `session_id`, or `POST …/ingestions/sessions` — creates it.
         """
         return await self._http.request(
             "PUT",
@@ -209,8 +215,16 @@ class AsyncSessionsResource:
     ) -> dict[str, Any]:
         """Append session messages.
 
-        Appends user/assistant messages to an open session, in order. The session stays open.
-        Tool-call turns are recorded separately by the MCP layer and are not accepted here.
+        Appends user/assistant messages to a session, in order, creating the session if this is
+        its first write, and queues memory formation over them. The returned `ingestion` is the
+        receipt to poll. Tool-call turns are recorded separately by the MCP layer and are not
+        accepted here.
+
+        New ids are limited to `[A-Za-z0-9][A-Za-z0-9.~:-]{0,127}`, but you can keep referring
+        to previous ids as they were defined.
+
+        Deprecated: use `POST …/ingestions/sessions`, which accepts the same messages under the
+        session's id.
         """
         return await self._http.request(
             "POST",
@@ -223,33 +237,15 @@ class AsyncSessionsResource:
     async def generate_memories(self, patient_id: str, session_id: str) -> dict[str, Any]:
         """Generate session memories.
 
-        Extracts memories from messages appended since the last run and infers memory↔fact
-        relationships. The session stays active and can keep receiving messages. Append-only: it
-        never re-extracts messages already covered by a prior run, so re-running it only adds
-        memories for what's new, but it does not deduplicate against memories from a previous
-        run. Call it intentionally rather than on every turn.
+        Accepts and does nothing: memories form from a session's messages as they arrive,
+        through appending messages or `POST …/ingestions/sessions`, each of which returns the
+        ingestion receipt to poll. `GET …/memories` returns a session's memories as they land.
+
+        Deprecated: drop the call.
         """
         return await self._http.request(
             "POST",
             "/v1/patients/{patientId}/sessions/{sessionId}/memories",
             path_params={"patientId": patient_id, "sessionId": session_id},
-            cast_to=_DICT,
-        )
-
-    async def ingest_session(
-        self, patient_id: str, body: IngestSessionBody | dict[str, Any]
-    ) -> dict[str, Any]:
-        """Ingest a complete session.
-
-        Replays a complete set of messages as one session: creates the session, appends every
-        message in order, then generates memories from it synchronously, so the response returns
-        only after the patient's memories reflect the conversation. Messages can still be
-        appended to the session. Intended for batch/replay use, not interactive sessions.
-        """
-        return await self._http.request(
-            "POST",
-            "/v1/patients/{patientId}/sessions/ingest",
-            path_params={"patientId": patient_id},
-            json=body,
             cast_to=_DICT,
         )

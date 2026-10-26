@@ -1,4 +1,4 @@
-# clinia-context-engine
+# Context Engine Python Client
 
 Python client for the Clinia Context Engine API. A thin, typed wrapper over
 [`httpx`](https://www.python-httpx.org/) with [Pydantic v2](https://docs.pydantic.dev/)
@@ -102,14 +102,14 @@ is not closed by `close()`.
 
 ## Development
 
-This repository is a mirror of each release; every release replaces its
-contents, so pull requests cannot be merged here. Report bugs and requests in
-[Issues](https://github.com/clinia/context-engine-py/issues).
+This package is generated from the Context Engine OpenAPI spec on each release —
+the Pydantic models by [datamodel-code-generator](https://github.com/koxudaxi/datamodel-code-generator),
+the resource classes from the same spec. Don't edit `generated/` or `resources/`
+by hand.
 
-The client is generated from the Context Engine OpenAPI spec — the Pydantic
-models in `generated/` by
-[datamodel-code-generator](https://github.com/koxudaxi/datamodel-code-generator),
-and the resource classes in `resources/`.
+The [GitHub repository](https://github.com/clinia/context-engine-py) mirrors each
+release, so it can't merge pull requests. Report bugs in its
+[issues](https://github.com/clinia/context-engine-py/issues).
 
 ```sh
 uv sync --group dev
@@ -118,6 +118,10 @@ uv run --group dev pyright
 uv run --group dev ruff check src tests
 ```
 
+## Changelog
+
+See the [Context Engine changelog](https://docs.clinia.com/changelog).
+
 ## License
 
-[Apache-2.0](LICENSE) © Clinia Health Inc.
+[Apache-2.0](https://github.com/clinia/context-engine-py/blob/main/LICENSE) © Clinia Health Inc.

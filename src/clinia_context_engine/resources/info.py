@@ -18,8 +18,9 @@ class InfoResource:
     def get_service_info(self) -> ServiceInfo:
         """Get service info.
 
-        Returns the service name and the build identity of the running process. Use it to
-        confirm which build a deployment is serving.
+        Returns the service name, its status, and the build identity of the running process. Use
+        it to confirm which build a deployment is serving, or as an availability probe: it
+        answers `200` when the service is healthy and `503` when it is degraded.
         """
         return self._http.request(
             "GET",
@@ -35,8 +36,9 @@ class AsyncInfoResource:
     async def get_service_info(self) -> ServiceInfo:
         """Get service info.
 
-        Returns the service name and the build identity of the running process. Use it to
-        confirm which build a deployment is serving.
+        Returns the service name, its status, and the build identity of the running process. Use
+        it to confirm which build a deployment is serving, or as an availability probe: it
+        answers `200` when the service is healthy and `503` when it is degraded.
         """
         return await self._http.request(
             "GET",

@@ -31,7 +31,7 @@ INGESTION = {
     "mimeType": "application/cda+xml",
     "receivedAt": "2026-01-01T00:00:00Z",
     "status": "pending",
-    "staged": {"facts": 0, "events": 0, "narratives": 0},
+    "staged": {"facts": 0, "events": 0, "narratives": 0, "messages": 0},
     "startedAt": None,
     "completedAt": None,
     "failure": None,
@@ -154,6 +154,46 @@ def test_edge_union_response_resolves_to_its_variant() -> None:
     assert isinstance(edge, ChunkedIntoEdge)
 
 
+def test_session_response_parses_as_the_session_model() -> None:
+    # A request body's inline item once took the `Session` name, and every session
+    # method then rejected the server's real response.
+    client, _ = capture(
+        {"sessionId": "chat-1", "patientId": "patient-1", "createdAt": "2026-01-01T00:00:00Z"}
+    )
+
+    session = client.sessions.upsert_session("patient-1", "chat-1")
+
+    assert session.session_id == "chat-1"
+
+
+def test_ingest_sessions_returns_each_session_id_on_intake() -> None:
+    client, sent = capture(
+        {
+            **INGESTION,
+            "source": "session/v1",
+            "mimeType": "application/json",
+            "intake": [
+                {
+                    "unit": "message",
+                    "received": 1,
+                    "entries": [{"kind": "user", "count": 1, "outcome": "text_only"}],
+                    "sessionId": "chat-1",
+                }
+            ],
+        },
+        status_code=202,
+    )
+
+    receipt = client.ingest.ingest_sessions(
+        "patient-1",
+        {"sessions": [{"sessionId": "chat-1", "messages": [{"role": "user", "content": "hi"}]}]},
+    )
+
+    assert json.loads(sent[0].content)["sessions"][0]["sessionId"] == "chat-1"
+    assert receipt.intake is not None
+    assert receipt.intake[0].session_id == "chat-1"
+
+
 def test_empty_response_returns_none() -> None:
     def handler(_: httpx.Request) -> httpx.Response:
         return httpx.Response(204)
@@ -239,7 +279,9 @@ def test_bearer_token_attached_per_request() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         sent.append(request)
-        return httpx.Response(200, json={"name": "engine", "version": version_payload()})
+        return httpx.Response(
+            200, json={"name": "engine", "status": "healthy", "version": version_payload()}
+        )
 
     def version_payload() -> dict[str, str]:
         return {"number": "0.0.0", "buildSha": "unknown", "buildDate": "unknown"}
