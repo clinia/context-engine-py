@@ -1138,6 +1138,176 @@ class Payload9(BaseModel):
     )
 
 
+class Ingredient(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    system: str
+    code: str
+    display: str | None = None
+
+
+class DoseForm(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    system: str
+    code: str
+    display: str | None = None
+
+
+class Concept(BaseModel):
+    """
+    The concept, as an RxNorm coding.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    system: str
+    code: str
+    display: str | None = None
+
+
+class PreciseItem(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    system: str
+    code: str
+    display: str | None = None
+
+
+class Member(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    concept: Concept = Field(..., description="The concept, as an RxNorm coding.")
+    precise: list[PreciseItem] = Field(
+        ...,
+        description="Its precise forms, such as an ingredient's salts or esters. Empty when the vocabulary names none.",
+    )
+
+
+class Candidate(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    method: Literal["code", "crosswalk", "exact-name", "normalized-name"] = Field(
+        ...,
+        description="The lookup step: `code`, `crosswalk`, `exact-name` or `normalized-name`, in the order they run.",
+    )
+    score: float = Field(..., description="How closely the candidate matched, from 0 to 1.")
+    members: list[Member] = Field(
+        ..., description="The concepts it names. A combination product names several."
+    )
+
+
+class MedicationConceptEvidence1(BaseModel):
+    """
+    How the vocabulary grounded a medication record's ingredients or its dose form: every candidate it found, or why it found none.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    status: Literal["grounded"]
+    candidates: list[Candidate] = Field(
+        ..., description="Every candidate found, best first. The first one gives the identity."
+    )
+
+
+class Code10(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    system: str
+    code: str
+
+
+class Attempts(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    method: Literal["code", "crosswalk", "exact-name", "normalized-name"] = Field(
+        ...,
+        description="The lookup step: `code`, `crosswalk`, `exact-name` or `normalized-name`, in the order they run.",
+    )
+    reason: Literal[
+        "unrecognized-system",
+        "unserved-system",
+        "unknown-code",
+        "no-crosswalk-equivalent",
+        "no-roll-up",
+    ] = Field(
+        ...,
+        description="Why the step gave up on these codes: a system it does not recognize, a system it does not serve, a code it does not hold, a code with no RxNorm equivalent, or a concept with no ingredient or dose form.",
+    )
+    codes: list[Code10] = Field(
+        ...,
+        description="The codes the step looked up, each system as the record spelled it or as its URI.",
+    )
+
+
+class Attempts1(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    method: Literal["code", "crosswalk", "exact-name", "normalized-name"] = Field(
+        ...,
+        description="The lookup step: `code`, `crosswalk`, `exact-name` or `normalized-name`, in the order they run.",
+    )
+    reason: Literal["no-name-match"]
+    names: list[str] = Field(..., description="The names the step looked up.")
+
+
+class Set(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    concept: Concept = Field(..., description="The concept, as an RxNorm coding.")
+    precise: list[PreciseItem] = Field(
+        ...,
+        description="Its precise forms, such as an ingredient's salts or esters. Empty when the vocabulary names none.",
+    )
+
+
+class Attempts2(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    method: Literal["code", "crosswalk", "exact-name", "normalized-name"] = Field(
+        ...,
+        description="The lookup step: `code`, `crosswalk`, `exact-name` or `normalized-name`, in the order they run.",
+    )
+    reason: Literal["ambiguous-name"]
+    names: list[str] = Field(..., description="The names the step looked up.")
+    sets: list[list[Set]] = Field(
+        ..., description="Each set of concepts the close names lead to, best match first."
+    )
+
+
+class MedicationConceptEvidence2(BaseModel):
+    """
+    How the vocabulary grounded a medication record's ingredients or its dose form: every candidate it found, or why it found none.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    status: Literal["abstained"]
+    reason: Literal[
+        "cascade-exhausted", "nothing-to-resolve", "unsupported-domain", "unserved-target-system"
+    ] = Field(
+        ...,
+        description="Why no candidate was found: every step that ran gave up (`cascade-exhausted`), the record carries nothing to look up (`nothing-to-resolve`), or the vocabulary is not set up for it.",
+    )
+    attempts: list[Attempts | Attempts1 | Attempts2] = Field(
+        ...,
+        description="How each step that ran gave up, in the order they ran. Empty unless `reason` is `cascade-exhausted`.",
+    )
+
+
 class EvidenceItem(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -1367,7 +1537,16 @@ class MedicationRouteEvidence4(BaseModel):
     reasoning: str = Field(..., description="Why the model named this route.")
 
 
-class Member(BaseModel):
+class Code11(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    system: str
+    code: str
+    display: str | None = None
+
+
+class Member1(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -1393,78 +1572,6 @@ class ScoredFactMember(BaseModel):
     )
     score: float = Field(
         ..., description="Score this member was ranked with when the field was decided."
-    )
-
-
-class Ingredient(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    system: str
-    code: str
-    display: str | None = None
-
-
-class DoseForm(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    system: str
-    code: str
-    display: str | None = None
-
-
-class MedicationIdentity(BaseModel):
-    """
-    What identifies a medication: its ingredients, its route, and for `other` the product's dose forms. Depending on how it was ingested, a medication is returned as its identity, codes, status and effective period, and leaves its dose, route text and dates on its members. Its `display` then reads as its identity, and it carries none when no identity was found.
-    """
-
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    ingredients: list[Ingredient] = Field(
-        ...,
-        description="Each RxNorm ingredient, at its precise grain when it is given as a salt or ester, sorted by code.",
-    )
-    route: (
-        Literal[
-            "oral",
-            "rectal",
-            "sublingual",
-            "buccal",
-            "nasogastric",
-            "intramuscular",
-            "intravenous",
-            "subcutaneous",
-            "intradermal",
-            "intrathecal",
-            "intraperitoneal",
-            "intra-articular",
-            "intraosseous",
-            "hemodialysis",
-            "urethral",
-            "intrauterine",
-            "intraocular",
-            "intravesical",
-            "topical",
-            "transdermal",
-            "ophthalmic",
-            "otic",
-            "nasal",
-            "vaginal",
-            "inhalation",
-            "nebulization",
-            "other",
-        ]
-        | None
-    ) = Field(
-        None,
-        description="A route group, or `other` for a route outside every group. Absent from an identity when the route is unknown.",
-    )
-    dose_forms: list[DoseForm] | None = Field(
-        None,
-        alias="doseForms",
-        description="The product's RxNorm dose forms, sorted by code. Only for `other`, and absent when unknown.",
     )
 
 
@@ -1615,7 +1722,7 @@ class ModelSource(BaseModel):
     )
 
 
-class Member10(BaseModel):
+class Member11(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -1666,7 +1773,7 @@ class Payload22(BaseModel):
     model_source: ModelSource = Field(
         ..., alias="modelSource", description="Model asked to write `title` and `summary`."
     )
-    members: list[Member10] = Field(
+    members: list[Member11] = Field(
         ..., description="The member narrative passages this narrative projects."
     )
     title: str | None = Field(
@@ -1904,7 +2011,7 @@ class Payload25(BaseModel):
         None,
         description="Observation sub-domain. Maps from FHIR Observation.category and CDA section LOINC codes: 30954-2 → laboratory/imaging, 8716-3 → vital-signs, Functional Status / Mental Status sections → functional-status.",
     )
-    codes: list[Code] | None = Field(
+    codes: list[Code11] | None = Field(
         None,
         description="Codes for the observation or panel, in whatever systems the source used — LOINC where it has one, e.g. '2947-0' (Sodium), but also CPT, a local analyte id, or a translation set.",
     )
@@ -1977,7 +2084,7 @@ class Payload26(BaseModel):
         alias="authoredAt",
         description="ISO date when the source entry was clinically recorded, from FHIR recordedDate/dateAsserted/recorded/FamilyMemberHistory.date or CDA entry/section author/time.",
     )
-    codes: list[Code] | None = Field(
+    codes: list[Code11] | None = Field(
         None, description="Procedure codes from CPT, SNOMED-CT, or ICD PCS."
     )
     body_site: str | None = Field(
@@ -2209,7 +2316,7 @@ class PreciseConceptId(RootModel[str]):
     root: str = Field(..., min_length=1)
 
 
-class Member11(BaseModel):
+class Member12(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -2227,7 +2334,7 @@ class A(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    members: list[Member11] = Field(
+    members: list[Member12] = Field(
         ...,
         description="The best candidate's members — more than one for a combination product.",
         min_length=1,
@@ -2239,7 +2346,7 @@ class A(BaseModel):
     composition_id: str = Field(..., alias="compositionId", min_length=1)
 
 
-class Member12(BaseModel):
+class Member13(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -2257,7 +2364,7 @@ class B(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    members: list[Member12] = Field(
+    members: list[Member13] = Field(
         ...,
         description="The best candidate's members — more than one for a combination product.",
         min_length=1,
@@ -2279,7 +2386,7 @@ class Evidence5(BaseModel):
     kind: Literal["concept-identity-match"]
 
 
-class Member13(BaseModel):
+class Member14(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -2297,7 +2404,7 @@ class A1(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    members: list[Member13] = Field(
+    members: list[Member14] = Field(
         ...,
         description="The best candidate's members — more than one for a combination product.",
         min_length=1,
@@ -2309,7 +2416,7 @@ class A1(BaseModel):
     composition_id: str = Field(..., alias="compositionId", min_length=1)
 
 
-class Member14(BaseModel):
+class Member15(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -2327,7 +2434,7 @@ class B1(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    members: list[Member14] = Field(
+    members: list[Member15] = Field(
         ...,
         description="The best candidate's members — more than one for a combination product.",
         min_length=1,
@@ -2349,7 +2456,7 @@ class Evidence6(BaseModel):
     kind: Literal["concept-identity-partial-match"]
 
 
-class Member15(BaseModel):
+class Member16(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -2367,7 +2474,7 @@ class A2(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    members: list[Member15] = Field(
+    members: list[Member16] = Field(
         ...,
         description="The best candidate's members — more than one for a combination product.",
         min_length=1,
@@ -2379,7 +2486,7 @@ class A2(BaseModel):
     composition_id: str = Field(..., alias="compositionId", min_length=1)
 
 
-class Member16(BaseModel):
+class Member17(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -2397,7 +2504,7 @@ class B2(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    members: list[Member16] = Field(
+    members: list[Member17] = Field(
         ...,
         description="The best candidate's members — more than one for a combination product.",
         min_length=1,
@@ -2417,36 +2524,6 @@ class Evidence7(BaseModel):
     a: A2
     b: B2
     kind: Literal["concept-identity-mismatch"]
-
-
-class Evidence8(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    layer: Literal["identity"]
-    a: MedicationIdentity
-    b: MedicationIdentity
-    kind: Literal["medication-identity-match"]
-
-
-class Evidence9(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    layer: Literal["identity"]
-    a: MedicationIdentity
-    b: MedicationIdentity
-    kind: Literal["medication-identity-mismatch"]
-
-
-class Evidence10(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    layer: Literal["identity"]
-    a: MedicationIdentity | None = None
-    b: MedicationIdentity | None = None
-    kind: Literal["medication-identity-incomplete"]
 
 
 class Evidence11(BaseModel):
@@ -2605,51 +2682,6 @@ class Evidence17(BaseModel):
     model_source: ModelSource1 = Field(..., alias="modelSource")
     reasoning: str = Field(
         ..., description="Human-readable reasoning returned for the pair.", min_length=1
-    )
-
-
-class Payload28(BaseModel):
-    """
-    Type-specific attributes of a `resolution_decision` edge.
-    """
-
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    verdict: Literal["merge", "reject"] = Field(
-        ...,
-        description="The decided outcome. `continue` is a control-flow signal for stop rules and is never recorded here.",
-    )
-    resolution: Literal["uncertain", "probable", "confirmed"] = Field(
-        ...,
-        description="The quality signal carried by the verdict (confirmed | probable | uncertain) — authoritative, and the only quality measure now that confidence floats are dropped. Both merges and rejects carry one.",
-    )
-    rule_id: str = Field(
-        ...,
-        alias="ruleId",
-        description="Id of the stop rule that fired, e.g. 'deterministic-code-exact'. This is the audit's 'why'.",
-    )
-    evidence: list[
-        Evidence1
-        | Evidence2
-        | Evidence3
-        | Evidence4
-        | Evidence5
-        | Evidence6
-        | Evidence7
-        | Evidence8
-        | Evidence9
-        | Evidence10
-        | Evidence11
-        | Evidence12
-        | Evidence13
-        | Evidence14
-        | Evidence15
-        | Evidence16
-        | Evidence17
-    ] = Field(
-        ...,
-        description="The full accumulated evidence the rule evaluated, in the order the layers ran.",
     )
 
 
@@ -2969,13 +3001,17 @@ class SessionMemoryList(BaseModel):
     meta: Meta2 = Field(..., description="Pagination metadata for the returned page.")
 
 
-class MedicationRouteDecision(BaseModel):
+class MedicationIdentity(BaseModel):
     """
-    How a medication record's route was decided: `route` is the route it was given, absent when no step placed it, and `evidence` holds every step's decision. Depending on how it was ingested, a medication record carries it.
+    What identifies a medication: its ingredients, its route, and for `other` the product's dose forms. Depending on how it was ingested, a medication record carries its own, and a fact the one its members share. Such a fact is returned as its identity, codes, status and effective period, and leaves its dose, route text and dates on its members. Its `display` then reads as its identity, and it carries none when no identity was found.
     """
 
     model_config = ConfigDict(
         populate_by_name=True,
+    )
+    ingredients: list[Ingredient] = Field(
+        ...,
+        description="Each RxNorm ingredient, at its precise grain when it is given as a salt or ester, sorted by code.",
     )
     route: (
         Literal[
@@ -3012,15 +3048,36 @@ class MedicationRouteDecision(BaseModel):
         None,
         description="A route group, or `other` for a route outside every group. Absent from an identity when the route is unknown.",
     )
-    evidence: list[
+    dose_forms: list[DoseForm] | None = Field(
+        None,
+        alias="doseForms",
+        description="The product's RxNorm dose forms, sorted by code. Only for `other`, and absent when unknown.",
+    )
+
+
+class MedicationIdentityEvidence(BaseModel):
+    """
+    How each part of a medication record's identity was decided. `ingredients` and `doseForms` are absent when no lookup was stored for them. Depending on how it was ingested, a medication record carries it.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    ingredients: MedicationConceptEvidence1 | MedicationConceptEvidence2 | None = Field(
+        None,
+        description="How the vocabulary grounded a medication record's ingredients or its dose form: every candidate it found, or why it found none.",
+    )
+    dose_forms: MedicationConceptEvidence1 | MedicationConceptEvidence2 | None = Field(
+        None,
+        alias="doseForms",
+        description="How the vocabulary grounded a medication record's ingredients or its dose form: every candidate it found, or why it found none.",
+    )
+    route: list[
         MedicationRouteEvidence1
         | MedicationRouteEvidence2
         | MedicationRouteEvidence3
         | MedicationRouteEvidence4
-    ] = Field(
-        ...,
-        description="Every decision the steps made about the route, in the order the steps ran.",
-    )
+    ] = Field(..., description="Every step's decision about the route, in the order the steps ran.")
 
 
 class ConflictItem(ScoredFactMember):
@@ -3046,6 +3103,81 @@ class FactConflicts1(BaseModel):
         ..., description="Members that carried the same value as the picked one."
     )
     conflict: list[ConflictItem] = Field(..., description="Members that carried a different value.")
+
+
+class Evidence8(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    layer: Literal["identity"]
+    a: MedicationIdentity
+    b: MedicationIdentity
+    kind: Literal["medication-identity-match"]
+
+
+class Evidence9(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    layer: Literal["identity"]
+    a: MedicationIdentity
+    b: MedicationIdentity
+    kind: Literal["medication-identity-mismatch"]
+
+
+class Evidence10(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    layer: Literal["identity"]
+    a: MedicationIdentity | None = None
+    b: MedicationIdentity | None = None
+    kind: Literal["medication-identity-incomplete"]
+
+
+class Payload28(BaseModel):
+    """
+    Type-specific attributes of a `resolution_decision` edge.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    verdict: Literal["merge", "reject"] = Field(
+        ...,
+        description="The decided outcome. `continue` is a control-flow signal for stop rules and is never recorded here.",
+    )
+    resolution: Literal["uncertain", "probable", "confirmed"] = Field(
+        ...,
+        description="The quality signal carried by the verdict (confirmed | probable | uncertain) — authoritative, and the only quality measure now that confidence floats are dropped. Both merges and rejects carry one.",
+    )
+    rule_id: str = Field(
+        ...,
+        alias="ruleId",
+        description="Id of the stop rule that fired, e.g. 'deterministic-code-exact'. This is the audit's 'why'.",
+    )
+    evidence: list[
+        Evidence1
+        | Evidence2
+        | Evidence3
+        | Evidence4
+        | Evidence5
+        | Evidence6
+        | Evidence7
+        | Evidence8
+        | Evidence9
+        | Evidence10
+        | Evidence11
+        | Evidence12
+        | Evidence13
+        | Evidence14
+        | Evidence15
+        | Evidence16
+        | Evidence17
+    ] = Field(
+        ...,
+        description="The full accumulated evidence the rule evaluated, in the order the layers ran.",
+    )
 
 
 class ResolutionDecisionEdge(BaseModel):
@@ -3220,7 +3352,8 @@ class Payload1(BaseModel):
         alias="assertedAt",
         description="ISO date when a clinician stated it held. Shows it held then, not when it started.",
     )
-    route_decision: MedicationRouteDecision | None = Field(None, alias="routeDecision")
+    identity: MedicationIdentity | None = None
+    identity_evidence: MedicationIdentityEvidence | None = Field(None, alias="identityEvidence")
     source: Source1 = Field(..., description="Where this fact was extracted from.")
     ingestion_id: str = Field(
         ..., alias="ingestionId", description="The ingestion request that introduced this row."
@@ -3271,7 +3404,7 @@ class Payload10(BaseModel):
     display: str = Field(
         ..., description="Human-readable label — condition name, drug name, vaccine name, etc."
     )
-    codes: list[Code] | None = Field(
+    codes: list[Code11] | None = Field(
         None,
         description="Clinical codes for this fact (SNOMED, ICD-10, RxNorm, CVX…). More than one when multiple coding systems apply.",
     )
@@ -3298,7 +3431,7 @@ class Payload10(BaseModel):
     status_changed_at: str | None = Field(
         None, alias="statusChangedAt", description="ISO date when its status last changed."
     )
-    members: list[Member] = Field(
+    members: list[Member1] = Field(
         ..., description="Every extracted fact this fact was projected from."
     )
     field_verdicts: dict[str, FactConflicts1] = Field(..., alias="fieldVerdicts")
@@ -3315,7 +3448,7 @@ class Payload11(BaseModel):
     display: str = Field(
         ..., description="Human-readable label — condition name, drug name, vaccine name, etc."
     )
-    codes: list[Code] | None = Field(
+    codes: list[Code11] | None = Field(
         None,
         description="Clinical codes for this fact (SNOMED, ICD-10, RxNorm, CVX…). More than one when multiple coding systems apply.",
     )
@@ -3368,7 +3501,7 @@ class Payload11(BaseModel):
         description="ISO date when a clinician stated it held. Shows it held then, not when it started.",
     )
     identity: MedicationIdentity | None = None
-    members: list[Member] = Field(
+    members: list[Member1] = Field(
         ..., description="Every extracted fact this fact was projected from."
     )
     field_verdicts: dict[str, FactConflicts1] = Field(..., alias="fieldVerdicts")
@@ -3385,7 +3518,7 @@ class Payload12(BaseModel):
     display: str = Field(
         ..., description="Human-readable label — condition name, drug name, vaccine name, etc."
     )
-    codes: list[Code] | None = Field(
+    codes: list[Code11] | None = Field(
         None,
         description="Clinical codes for this fact (SNOMED, ICD-10, RxNorm, CVX…). More than one when multiple coding systems apply.",
     )
@@ -3426,7 +3559,7 @@ class Payload12(BaseModel):
         alias="lastReactionAt",
         description="ISO date of the most recent known reaction to the substance.",
     )
-    members: list[Member] = Field(
+    members: list[Member1] = Field(
         ..., description="Every extracted fact this fact was projected from."
     )
     field_verdicts: dict[str, FactConflicts1] = Field(..., alias="fieldVerdicts")
@@ -3443,7 +3576,7 @@ class Payload13(BaseModel):
     display: str = Field(
         ..., description="Human-readable label — condition name, drug name, vaccine name, etc."
     )
-    codes: list[Code] | None = Field(
+    codes: list[Code11] | None = Field(
         None,
         description="Clinical codes for this fact (SNOMED, ICD-10, RxNorm, CVX…). More than one when multiple coding systems apply.",
     )
@@ -3473,7 +3606,7 @@ class Payload13(BaseModel):
     age: str | float | None = Field(
         None, description="The relative's age: in years, or as the source states it."
     )
-    members: list[Member] = Field(
+    members: list[Member1] = Field(
         ..., description="Every extracted fact this fact was projected from."
     )
     field_verdicts: dict[str, FactConflicts1] = Field(..., alias="fieldVerdicts")
@@ -3490,7 +3623,7 @@ class Payload14(BaseModel):
     display: str = Field(
         ..., description="Human-readable label — condition name, drug name, vaccine name, etc."
     )
-    codes: list[Code] | None = Field(
+    codes: list[Code11] | None = Field(
         None,
         description="Clinical codes for this fact (SNOMED, ICD-10, RxNorm, CVX…). More than one when multiple coding systems apply.",
     )
@@ -3523,7 +3656,7 @@ class Payload14(BaseModel):
         alias="issuedAt",
         description="ISO date when the result was released, which comes after it was measured.",
     )
-    members: list[Member] = Field(
+    members: list[Member1] = Field(
         ..., description="Every extracted fact this fact was projected from."
     )
     field_verdicts: dict[str, FactConflicts1] = Field(..., alias="fieldVerdicts")
@@ -3540,7 +3673,7 @@ class Payload15(BaseModel):
     display: str = Field(
         ..., description="Human-readable label — condition name, drug name, vaccine name, etc."
     )
-    codes: list[Code] | None = Field(
+    codes: list[Code11] | None = Field(
         None,
         description="Clinical codes for this fact (SNOMED, ICD-10, RxNorm, CVX…). More than one when multiple coding systems apply.",
     )
@@ -3577,7 +3710,7 @@ class Payload15(BaseModel):
         alias="infoPresentedAt",
         description="ISO date when the vaccine information statement was given to the patient.",
     )
-    members: list[Member] = Field(
+    members: list[Member1] = Field(
         ..., description="Every extracted fact this fact was projected from."
     )
     field_verdicts: dict[str, FactConflicts1] = Field(..., alias="fieldVerdicts")
@@ -3594,7 +3727,7 @@ class Payload16(BaseModel):
     display: str = Field(
         ..., description="Human-readable label — condition name, drug name, vaccine name, etc."
     )
-    codes: list[Code] | None = Field(
+    codes: list[Code11] | None = Field(
         None,
         description="Clinical codes for this fact (SNOMED, ICD-10, RxNorm, CVX…). More than one when multiple coding systems apply.",
     )
@@ -3619,7 +3752,7 @@ class Payload16(BaseModel):
     expires_at: str | None = Field(
         None, alias="expiresAt", description="ISO date when the vaccine lot or device expires."
     )
-    members: list[Member] = Field(
+    members: list[Member1] = Field(
         ..., description="Every extracted fact this fact was projected from."
     )
     field_verdicts: dict[str, FactConflicts1] = Field(..., alias="fieldVerdicts")
@@ -3636,7 +3769,7 @@ class Payload17(BaseModel):
     display: str = Field(
         ..., description="Human-readable label — condition name, drug name, vaccine name, etc."
     )
-    codes: list[Code] | None = Field(
+    codes: list[Code11] | None = Field(
         None,
         description="Clinical codes for this fact (SNOMED, ICD-10, RxNorm, CVX…). More than one when multiple coding systems apply.",
     )
@@ -3662,7 +3795,7 @@ class Payload17(BaseModel):
         None,
         description="Flattened address string from Patient.address, e.g. 'Laporte, CO'. Kept as a single string since HG provides it pre-formatted.",
     )
-    members: list[Member] = Field(
+    members: list[Member1] = Field(
         ..., description="Every extracted fact this fact was projected from."
     )
     field_verdicts: dict[str, FactConflicts1] = Field(..., alias="fieldVerdicts")
@@ -3679,7 +3812,7 @@ class Payload18(BaseModel):
     display: str = Field(
         ..., description="Human-readable label — condition name, drug name, vaccine name, etc."
     )
-    codes: list[Code] | None = Field(
+    codes: list[Code11] | None = Field(
         None,
         description="Clinical codes for this fact (SNOMED, ICD-10, RxNorm, CVX…). More than one when multiple coding systems apply.",
     )
@@ -3705,7 +3838,7 @@ class Payload18(BaseModel):
         alias="effectivePeriod",
         description="When the fact held: `start` is when it became active, `end` when it ended or was resolved.",
     )
-    members: list[Member] = Field(
+    members: list[Member1] = Field(
         ..., description="Every extracted fact this fact was projected from."
     )
     field_verdicts: dict[str, FactConflicts1] = Field(..., alias="fieldVerdicts")
@@ -3722,7 +3855,7 @@ class Payload19(BaseModel):
     display: str = Field(
         ..., description="Human-readable label — condition name, drug name, vaccine name, etc."
     )
-    codes: list[Code] | None = Field(
+    codes: list[Code11] | None = Field(
         None,
         description="Clinical codes for this fact (SNOMED, ICD-10, RxNorm, CVX…). More than one when multiple coding systems apply.",
     )
@@ -3753,7 +3886,7 @@ class Payload19(BaseModel):
         alias="verifiedAt",
         description="ISO date when someone last confirmed it is still valid.",
     )
-    members: list[Member] = Field(
+    members: list[Member1] = Field(
         ..., description="Every extracted fact this fact was projected from."
     )
     field_verdicts: dict[str, FactConflicts1] = Field(..., alias="fieldVerdicts")

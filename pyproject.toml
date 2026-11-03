@@ -1,6 +1,6 @@
 [project]
 name = "clinia-context-engine"
-version = "0.9.0"
+version = "0.10.0"
 description = "Python client for the Clinia Context Engine API"
 readme = "README.md"
 license = "Apache-2.0"
@@ -36,13 +36,13 @@ Issues = "https://github.com/clinia/context-engine-py/issues"
 
 [dependency-groups]
 dev = [
-  "pytest>=8",
-  "pytest-asyncio>=0.24",
-  "respx>=0.22",
-  "pyright>=1.1.390",
-  "ruff>=0.8",
-  "datamodel-code-generator>=0.78",
-  "twine>=6",
+  "pytest==9.1.1",
+  "pytest-asyncio==1.4.0",
+  "respx==0.23.1",
+  "pyright==1.1.414",
+  "ruff==0.17.1",
+  "datamodel-code-generator==0.83.0",
+  "twine==7.0.0",
 ]
 
 [build-system]
