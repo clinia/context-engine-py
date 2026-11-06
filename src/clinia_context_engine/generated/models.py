@@ -2273,30 +2273,6 @@ class Evidence3(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    kind: Literal["hierarchical-code-match"]
-    layer: Literal["deterministic-code"]
-    system: str = Field(
-        ...,
-        description="The code system the match was made in: its canonical URI when recognized, the source spelling otherwise.",
-    )
-    system_recognized: bool = Field(
-        ...,
-        alias="systemRecognized",
-        description="Whether the code system was one the vocabulary layer recognizes at decision time.",
-    )
-    code_a: str = Field(..., alias="codeA", description="The code from entity A.")
-    code_b: str = Field(..., alias="codeB", description="The code from entity B.")
-    ancestor_code: str = Field(
-        ...,
-        alias="ancestorCode",
-        description="The ancestor code that links the two entities' codes hierarchically.",
-    )
-
-
-class Evidence4(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     kind: Literal["code-mismatch"]
     layer: Literal["deterministic-code"]
     system: str = Field(
@@ -2376,7 +2352,7 @@ class B(BaseModel):
     composition_id: str = Field(..., alias="compositionId", min_length=1)
 
 
-class Evidence5(BaseModel):
+class Evidence4(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -2446,7 +2422,7 @@ class B1(BaseModel):
     composition_id: str = Field(..., alias="compositionId", min_length=1)
 
 
-class Evidence6(BaseModel):
+class Evidence5(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -2516,7 +2492,7 @@ class B2(BaseModel):
     composition_id: str = Field(..., alias="compositionId", min_length=1)
 
 
-class Evidence7(BaseModel):
+class Evidence6(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -2526,7 +2502,7 @@ class Evidence7(BaseModel):
     kind: Literal["concept-identity-mismatch"]
 
 
-class Evidence11(BaseModel):
+class Evidence10(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -2552,7 +2528,7 @@ class Measurement(BaseModel):
     similarity: float = Field(..., ge=-1.0, le=1.0)
 
 
-class Evidence12(BaseModel):
+class Evidence11(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -2591,7 +2567,7 @@ class ModelSource1(BaseModel):
     )
 
 
-class Evidence13(BaseModel):
+class Evidence12(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -2607,7 +2583,7 @@ class Evidence13(BaseModel):
     model_source: ModelSource1 = Field(..., alias="modelSource")
 
 
-class Evidence14(BaseModel):
+class Evidence13(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         populate_by_name=True,
@@ -2621,7 +2597,7 @@ class Evidence14(BaseModel):
     match: Literal[False]
 
 
-class Evidence15(BaseModel):
+class Evidence14(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         populate_by_name=True,
@@ -2655,7 +2631,7 @@ class Conflict1(BaseModel):
     )
 
 
-class Evidence16(BaseModel):
+class Evidence15(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         populate_by_name=True,
@@ -2673,7 +2649,7 @@ class Evidence16(BaseModel):
     )
 
 
-class Evidence17(BaseModel):
+class Evidence16(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -3105,7 +3081,7 @@ class FactConflicts1(BaseModel):
     conflict: list[ConflictItem] = Field(..., description="Members that carried a different value.")
 
 
-class Evidence8(BaseModel):
+class Evidence7(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -3115,7 +3091,7 @@ class Evidence8(BaseModel):
     kind: Literal["medication-identity-match"]
 
 
-class Evidence9(BaseModel):
+class Evidence8(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -3125,7 +3101,7 @@ class Evidence9(BaseModel):
     kind: Literal["medication-identity-mismatch"]
 
 
-class Evidence10(BaseModel):
+class Evidence9(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -3173,7 +3149,6 @@ class Payload28(BaseModel):
         | Evidence14
         | Evidence15
         | Evidence16
-        | Evidence17
     ] = Field(
         ...,
         description="The full accumulated evidence the rule evaluated, in the order the layers ran.",
