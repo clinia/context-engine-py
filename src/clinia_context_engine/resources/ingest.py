@@ -142,6 +142,25 @@ class IngestResource:
             cast_to=_INGESTION,
         )
 
+    def ingest_files(self, patient_id: str, body: dict[str, Any]) -> Ingestion:
+        """Ingest files.
+
+        Submits PDF, TIFF, JPEG or PNG files as `multipart/form-data`, one `files` part per
+        file. Text is extracted page by page before the response is returned.
+
+        The response is a receipt: ingestion continues after it is returned, so poll the
+        ingestion to follow it. `intake` comes back index-aligned with the files you sent. If
+        text extraction fails or runs past its deadline, the request is rejected and nothing is
+        stored.
+        """
+        return self._http.request(
+            "POST",
+            "/v1/patients/{patientId}/ingestions/files",
+            path_params={"patientId": patient_id},
+            multipart=body,
+            cast_to=_INGESTION,
+        )
+
 
 class AsyncIngestResource:
     def __init__(self, http: AsyncHttpClient) -> None:
@@ -272,5 +291,24 @@ class AsyncIngestResource:
             "/v1/patients/{patientId}/ingestions/sessions",
             path_params={"patientId": patient_id},
             json=body,
+            cast_to=_INGESTION,
+        )
+
+    async def ingest_files(self, patient_id: str, body: dict[str, Any]) -> Ingestion:
+        """Ingest files.
+
+        Submits PDF, TIFF, JPEG or PNG files as `multipart/form-data`, one `files` part per
+        file. Text is extracted page by page before the response is returned.
+
+        The response is a receipt: ingestion continues after it is returned, so poll the
+        ingestion to follow it. `intake` comes back index-aligned with the files you sent. If
+        text extraction fails or runs past its deadline, the request is rejected and nothing is
+        stored.
+        """
+        return await self._http.request(
+            "POST",
+            "/v1/patients/{patientId}/ingestions/files",
+            path_params={"patientId": patient_id},
+            multipart=body,
             cast_to=_INGESTION,
         )

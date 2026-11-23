@@ -46,7 +46,9 @@ class VFSResource:
 
         Returns the content of a VFS file at the given path. Three output formats are supported:
         `narrative` (full Markdown, default), `compact` (condensed Markdown), and `structured`
-        (machine-readable JSON). Use `token_budget` to cap approximate output length in tokens.
+        (machine-readable JSON). Use `token_budget` to cap approximate output length in tokens
+        in `narrative` or `compact`; a `structured` read refuses it with a 400, since cut JSON
+        does not parse.
         """
         return self._http.request(
             "GET",
@@ -89,7 +91,9 @@ class AsyncVFSResource:
 
         Returns the content of a VFS file at the given path. Three output formats are supported:
         `narrative` (full Markdown, default), `compact` (condensed Markdown), and `structured`
-        (machine-readable JSON). Use `token_budget` to cap approximate output length in tokens.
+        (machine-readable JSON). Use `token_budget` to cap approximate output length in tokens
+        in `narrative` or `compact`; a `structured` read refuses it with a 400, since cut JSON
+        does not parse.
         """
         return await self._http.request(
             "GET",

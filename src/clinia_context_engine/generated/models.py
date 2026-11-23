@@ -9,6 +9,76 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, RootModel
 
 
+class Ingredient(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    system: str
+    code: str
+    display: str | None = None
+
+
+class DoseForm(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    system: str
+    code: str
+    display: str | None = None
+
+
+class Component(BaseModel):
+    """
+    The LOINC component: what is measured.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    system: str
+    code: str
+    display: str | None = None
+
+
+class Specimen(BaseModel):
+    """
+    The LOINC system: what the specimen is.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    system: str
+    code: str
+    display: str | None = None
+
+
+class Property(BaseModel):
+    """
+    The LOINC property: the kind of quantity.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    system: str
+    code: str
+    display: str | None = None
+
+
+class LabIdentity(BaseModel):
+    """
+    What makes two lab results the same lab: their LOINC component, specimen and property. Two LOINC tests with the same parts are one lab. Depending on how it was ingested, a laboratory record carries it once a step identified it.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    component: Component = Field(..., description="The LOINC component: what is measured.")
+    specimen: Specimen = Field(..., description="The LOINC system: what the specimen is.")
+    property: Property = Field(..., description="The LOINC property: the kind of quantity.")
+
+
 class Version(BaseModel):
     """
     Build identity of the running process.
@@ -463,6 +533,25 @@ class IngestionStaged(BaseModel):
     messages: int = Field(..., description="Conversation messages staged.", ge=0)
 
 
+class PageNumber(RootModel[int]):
+    root: int = Field(..., gt=0)
+
+
+class IngestionLimit(BaseModel):
+    """
+    Present on an `over_limit` entry when the limit is known: the limit it is over.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    name: Literal["file_bytes", "pages_per_file"] = Field(
+        ...,
+        description="file_bytes: one file's size, in bytes. pages_per_file: one file's page count.",
+    )
+    value: int = Field(..., description="The most the limit allows, in its unit.", gt=0)
+
+
 class IngestFhirBody(BaseModel):
     """
     A FHIR Bundle or a single FHIR resource.
@@ -591,6 +680,12 @@ class Child(BaseModel):
     )
     preview: str | None = Field(
         None, description="Short content preview for file nodes. Absent for directories."
+    )
+    count_hint: int | None = Field(
+        None,
+        alias="countHint",
+        description="Experimental: how many items a directory holds, as its preview counts them. Absent when the directory has no count. May change or disappear in any release.",
+        ge=0,
     )
 
 
@@ -1138,16 +1233,11 @@ class Payload9(BaseModel):
     )
 
 
-class Ingredient(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    system: str
-    code: str
-    display: str | None = None
+class Test(BaseModel):
+    """
+    The LOINC test the record's identity was read from; present with the identity.
+    """
 
-
-class DoseForm(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -1185,7 +1275,7 @@ class Member(BaseModel):
     concept: Concept = Field(..., description="The concept, as an RxNorm coding.")
     precise: list[PreciseItem] = Field(
         ...,
-        description="Its precise forms, such as an ingredient's salts or esters. Empty when the vocabulary names none.",
+        description="Its precise forms, such as an ingredient's salts or esters. Empty when the vocabulary names none, or when the ingredient comes in only one form.",
     )
 
 
@@ -1268,7 +1358,7 @@ class Set(BaseModel):
     concept: Concept = Field(..., description="The concept, as an RxNorm coding.")
     precise: list[PreciseItem] = Field(
         ...,
-        description="Its precise forms, such as an ingredient's salts or esters. Empty when the vocabulary names none.",
+        description="Its precise forms, such as an ingredient's salts or esters. Empty when the vocabulary names none, or when the ingredient comes in only one form.",
     )
 
 
@@ -1319,7 +1409,7 @@ class EvidenceItem(BaseModel):
 
 class MedicationRouteEvidence1(BaseModel):
     """
-    One step's decision about a medication record's route: the route it named and how. `code-match` reads the product's dose form, `phrase-match` the record's texts, `evaluation` and `judgement` ask a model. A model's decision below its confidence threshold, or one the model is not sure of, stays as evidence without giving the route.
+    One step's decision about a medication record's route: the route it named and how. `code-match` reads the product's dose form, `phrase-match` the record's texts, `evaluation` and `judgement` ask a model. A model's decision below its confidence threshold, or one the model is not sure of, stays as evidence without giving the route. An `evaluation` with no `route` answered that the record does not say how the medication is given.
     """
 
     model_config = ConfigDict(
@@ -1373,7 +1463,7 @@ class EvidenceItem1(BaseModel):
 
 class MedicationRouteEvidence2(BaseModel):
     """
-    One step's decision about a medication record's route: the route it named and how. `code-match` reads the product's dose form, `phrase-match` the record's texts, `evaluation` and `judgement` ask a model. A model's decision below its confidence threshold, or one the model is not sure of, stays as evidence without giving the route.
+    One step's decision about a medication record's route: the route it named and how. `code-match` reads the product's dose form, `phrase-match` the record's texts, `evaluation` and `judgement` ask a model. A model's decision below its confidence threshold, or one the model is not sure of, stays as evidence without giving the route. An `evaluation` with no `route` answered that the record does not say how the medication is given.
     """
 
     model_config = ConfigDict(
@@ -1441,47 +1531,51 @@ class Evidence(BaseModel):
 
 class MedicationRouteEvidence3(BaseModel):
     """
-    One step's decision about a medication record's route: the route it named and how. `code-match` reads the product's dose form, `phrase-match` the record's texts, `evaluation` and `judgement` ask a model. A model's decision below its confidence threshold, or one the model is not sure of, stays as evidence without giving the route.
+    One step's decision about a medication record's route: the route it named and how. `code-match` reads the product's dose form, `phrase-match` the record's texts, `evaluation` and `judgement` ask a model. A model's decision below its confidence threshold, or one the model is not sure of, stays as evidence without giving the route. An `evaluation` with no `route` answered that the record does not say how the medication is given.
     """
 
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    route: Literal[
-        "oral",
-        "rectal",
-        "sublingual",
-        "buccal",
-        "nasogastric",
-        "intramuscular",
-        "intravenous",
-        "subcutaneous",
-        "intradermal",
-        "intrathecal",
-        "intraperitoneal",
-        "intra-articular",
-        "intraosseous",
-        "hemodialysis",
-        "urethral",
-        "intrauterine",
-        "intraocular",
-        "intravesical",
-        "topical",
-        "transdermal",
-        "ophthalmic",
-        "otic",
-        "nasal",
-        "vaginal",
-        "inhalation",
-        "nebulization",
-        "other",
-    ] = Field(
-        ...,
+    route: (
+        Literal[
+            "oral",
+            "rectal",
+            "sublingual",
+            "buccal",
+            "nasogastric",
+            "intramuscular",
+            "intravenous",
+            "subcutaneous",
+            "intradermal",
+            "intrathecal",
+            "intraperitoneal",
+            "intra-articular",
+            "intraosseous",
+            "hemodialysis",
+            "urethral",
+            "intrauterine",
+            "intraocular",
+            "intravesical",
+            "topical",
+            "transdermal",
+            "ophthalmic",
+            "otic",
+            "nasal",
+            "vaginal",
+            "inhalation",
+            "nebulization",
+            "other",
+        ]
+        | None
+    ) = Field(
+        None,
         description="A route group, or `other` for a route outside every group. Absent from an identity when the route is unknown.",
     )
     method: Literal["evaluation"]
     confidence: float = Field(
-        ..., description="The probability the model gave this route, from 0 to 1."
+        ...,
+        description="The probability the model assigned to its answer, from 0 to 1. With no `route`, the answer is that the record does not say how the medication is given.",
     )
     model: Model
     evidence: list[str | Evidence] = Field(..., description="The texts and codings the model read.")
@@ -1489,7 +1583,7 @@ class MedicationRouteEvidence3(BaseModel):
 
 class MedicationRouteEvidence4(BaseModel):
     """
-    One step's decision about a medication record's route: the route it named and how. `code-match` reads the product's dose form, `phrase-match` the record's texts, `evaluation` and `judgement` ask a model. A model's decision below its confidence threshold, or one the model is not sure of, stays as evidence without giving the route.
+    One step's decision about a medication record's route: the route it named and how. `code-match` reads the product's dose form, `phrase-match` the record's texts, `evaluation` and `judgement` ask a model. A model's decision below its confidence threshold, or one the model is not sure of, stays as evidence without giving the route. An `evaluation` with no `route` answered that the record does not say how the medication is given.
     """
 
     model_config = ConfigDict(
@@ -1537,6 +1631,130 @@ class MedicationRouteEvidence4(BaseModel):
     reasoning: str = Field(..., description="Why the model named this route.")
 
 
+class LabIdentityEvidence1(BaseModel):
+    """
+    How a laboratory record's identity was decided. `identified` names the step that decided it: `code-match` reads the record's own code, `evaluation` asks a model. `excluded` rules the record out as a lab result, and `incomplete` leaves it with no identity. Depending on how it was ingested, a laboratory record carries it.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    status: Literal["identified"]
+    method: Literal["code-match"]
+
+
+class EvidenceItem2(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    code: str = Field(..., description="The candidate test's LOINC code.")
+    source: Literal[
+        "panel-member", "panel-by-name", "name-search", "order-name-search", "other-form"
+    ] = Field(
+        ...,
+        description="Where the candidate came from: the panel's tests (`panel-member`, `panel-by-name`), a search by the result's or its panel's name, or another form of a found test's analyte (`other-form`).",
+    )
+    contradicted_by: Literal["unit", "specimen", "count-or-percent", "class"] | None = Field(
+        None,
+        alias="contradictedBy",
+        description="What in the record rules the candidate out; absent when nothing does.",
+    )
+
+
+class LabIdentityEvidence2(BaseModel):
+    """
+    How a laboratory record's identity was decided. `identified` names the step that decided it: `code-match` reads the record's own code, `evaluation` asks a model. `excluded` rules the record out as a lab result, and `incomplete` leaves it with no identity. Depending on how it was ingested, a laboratory record carries it.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    status: Literal["identified"]
+    method: Literal["evaluation"]
+    code: str = Field(..., description="The LOINC code of the test the model chose.")
+    confidence: float = Field(
+        ..., description="The probability the model assigned to its answer, from 0 to 1."
+    )
+    model: Model
+    evidence: list[EvidenceItem2] = Field(..., description="The tests the model chose from.")
+
+
+class LabIdentityEvidence3(BaseModel):
+    """
+    How a laboratory record's identity was decided. `identified` names the step that decided it: `code-match` reads the record's own code, `evaluation` asks a model. `excluded` rules the record out as a lab result, and `incomplete` leaves it with no identity. Depending on how it was ingested, a laboratory record carries it.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    status: Literal["excluded"]
+    reason: Literal["specimen-source", "not-performed", "workflow-flag", "form-field"] = Field(
+        ...,
+        description="Why the record is not a lab result: it names where the specimen came from, the test was not done, it is an order or workflow status, or it is a field of a form.",
+    )
+
+
+class Evaluation(BaseModel):
+    """
+    The model's answer, kept when it was not used.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    code: str | None = Field(
+        None, description="The LOINC code of the test the model chose; absent when it chose none."
+    )
+    confidence: float = Field(
+        ..., description="The probability the model assigned to its answer, from 0 to 1."
+    )
+    model: Model
+    evidence: list[EvidenceItem2] = Field(..., description="The tests the model chose from.")
+
+
+class LabIdentityEvidence4(BaseModel):
+    """
+    How a laboratory record's identity was decided. `identified` names the step that decided it: `code-match` reads the record's own code, `evaluation` asks a model. `excluded` rules the record out as a lab result, and `incomplete` leaves it with no identity. Depending on how it was ingested, a laboratory record carries it.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    status: Literal["incomplete"]
+    reason: Literal[
+        "no-code",
+        "not-loinc",
+        "unserved-system",
+        "malformed-code",
+        "unknown-code",
+        "codes-disagree",
+        "no-parts",
+        "retired",
+    ] = Field(
+        ...,
+        description="Why the code step left the record: it has no code (`no-code`), its code is not a LOINC code the lookup holds (`not-loinc`, `unserved-system`, `malformed-code`, `unknown-code`), its codes name different tests (`codes-disagree`), its test has no parts (`no-parts`), or its test is deprecated (`retired`).",
+    )
+    model_reason: (
+        Literal[
+            "no-candidates",
+            "no-value",
+            "model-none",
+            "below-threshold",
+            "contradicted",
+            "no-answer",
+            "input-too-long",
+        ]
+        | None
+    ) = Field(
+        None,
+        alias="modelReason",
+        description="Why the model step left the record: no test was found to offer it (`no-candidates`), the record has no value (`no-value`), the model chose none of the tests (`model-none`), it was not sure enough (`below-threshold`), the record contradicts the test it chose (`contradicted`), it gave no answer (`no-answer`), or the question was too long to send (`input-too-long`). Absent when that step has not run.",
+    )
+    evaluation: Evaluation | None = Field(
+        None, description="The model's answer, kept when it was not used."
+    )
+
+
 class Code11(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -1575,7 +1793,7 @@ class ScoredFactMember(BaseModel):
     )
 
 
-class Source11(BaseModel):
+class Source12(BaseModel):
     """
     Provenance of the originating document, end-to-end.
     """
@@ -1598,7 +1816,7 @@ class Source11(BaseModel):
     )
 
 
-class Payload20(BaseModel):
+class Payload22(BaseModel):
     """
     Type-specific attributes of an `extracted_narrative` node.
     """
@@ -1615,7 +1833,7 @@ class Payload20(BaseModel):
         alias="effectiveAt",
         description="ISO 8601 clinical effective time, or null when the source carries none.",
     )
-    source: Source11 = Field(..., description="Provenance of the originating document, end-to-end.")
+    source: Source12 = Field(..., description="Provenance of the originating document, end-to-end.")
     content: str = Field(..., description="The decoded text of this source unit.")
     metadata: dict[str, Any] = Field(
         ...,
@@ -1645,12 +1863,12 @@ class ExtractedNarrativeNode(BaseModel):
     updated_at: str = Field(
         ..., alias="updatedAt", description="ISO 8601 timestamp when this node was last updated."
     )
-    payload: Payload20 = Field(
+    payload: Payload22 = Field(
         ..., description="Type-specific attributes of an `extracted_narrative` node."
     )
 
 
-class Payload21(BaseModel):
+class Payload23(BaseModel):
     """
     Type-specific attributes of a `narrative_passage` node.
     """
@@ -1700,7 +1918,7 @@ class NarrativePassageNode(BaseModel):
     updated_at: str = Field(
         ..., alias="updatedAt", description="ISO 8601 timestamp when this node was last updated."
     )
-    payload: Payload21 = Field(
+    payload: Payload23 = Field(
         ..., description="Type-specific attributes of a `narrative_passage` node."
     )
 
@@ -1722,7 +1940,7 @@ class ModelSource(BaseModel):
     )
 
 
-class Member11(BaseModel):
+class Member12(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -1757,7 +1975,7 @@ class Quote(BaseModel):
     )
 
 
-class Payload22(BaseModel):
+class Payload24(BaseModel):
     """
     Type-specific attributes of a `narrative` node.
     """
@@ -1773,7 +1991,7 @@ class Payload22(BaseModel):
     model_source: ModelSource = Field(
         ..., alias="modelSource", description="Model asked to write `title` and `summary`."
     )
-    members: list[Member11] = Field(
+    members: list[Member12] = Field(
         ..., description="The member narrative passages this narrative projects."
     )
     title: str | None = Field(
@@ -1799,6 +2017,7 @@ class Payload22(BaseModel):
             "demographic",
             "insurance",
             "directive",
+            "laboratory",
         ]
     ] = Field(
         ..., alias="boundFactTypes", description="Fact types this narrative plausibly concerns."
@@ -1831,10 +2050,10 @@ class NarrativeNode(BaseModel):
     updated_at: str = Field(
         ..., alias="updatedAt", description="ISO 8601 timestamp when this node was last updated."
     )
-    payload: Payload22 = Field(..., description="Type-specific attributes of a `narrative` node.")
+    payload: Payload24 = Field(..., description="Type-specific attributes of a `narrative` node.")
 
 
-class Payload23(BaseModel):
+class Payload25(BaseModel):
     """
     Type-specific attributes of a `learned_memory` node.
     """
@@ -1874,7 +2093,7 @@ class LearnedMemoryNode(BaseModel):
     updated_at: str = Field(
         ..., alias="updatedAt", description="ISO 8601 timestamp when this node was last updated."
     )
-    payload: Payload23 = Field(
+    payload: Payload25 = Field(
         ..., description="Type-specific attributes of a `learned_memory` node."
     )
 
@@ -1900,7 +2119,7 @@ class ReasonCode(BaseModel):
     display: str | None = None
 
 
-class Source12(BaseModel):
+class Source13(BaseModel):
     """
     Where this event was extracted from. Events are single-source — not merged across sources.
     """
@@ -1923,7 +2142,7 @@ class Source12(BaseModel):
     )
 
 
-class Payload24(BaseModel):
+class Payload26(BaseModel):
     """
     Type-specific attributes of an `extracted_clinical_event` node.
     """
@@ -1963,7 +2182,7 @@ class Payload24(BaseModel):
     status_changed_at: str | None = Field(
         None, alias="statusChangedAt", description="ISO date when its status last changed."
     )
-    source: Source12 = Field(
+    source: Source13 = Field(
         ...,
         description="Where this event was extracted from. Events are single-source — not merged across sources.",
     )
@@ -1974,7 +2193,7 @@ class Payload24(BaseModel):
     )
 
 
-class Payload25(BaseModel):
+class Payload27(BaseModel):
     """
     Type-specific attributes of an `extracted_clinical_event` node.
     """
@@ -2052,7 +2271,7 @@ class Payload25(BaseModel):
         alias="issuedAt",
         description="ISO date when the result was released, which comes after it was measured.",
     )
-    source: Source12 = Field(
+    source: Source13 = Field(
         ...,
         description="Where this event was extracted from. Events are single-source — not merged across sources.",
     )
@@ -2063,7 +2282,7 @@ class Payload25(BaseModel):
     )
 
 
-class Payload26(BaseModel):
+class Payload28(BaseModel):
     """
     Type-specific attributes of an `extracted_clinical_event` node.
     """
@@ -2112,7 +2331,7 @@ class Payload26(BaseModel):
         alias="plannedPeriod",
         description="When it is intended to happen, as opposed to when it did: a scheduled encounter or procedure, the intended dosing or therapy span.",
     )
-    source: Source12 = Field(
+    source: Source13 = Field(
         ...,
         description="Where this event was extracted from. Events are single-source — not merged across sources.",
     )
@@ -2132,7 +2351,7 @@ class MedicationCode(BaseModel):
     display: str | None = None
 
 
-class Payload27(BaseModel):
+class Payload29(BaseModel):
     """
     Type-specific attributes of an `extracted_clinical_event` node.
     """
@@ -2206,7 +2425,7 @@ class Payload27(BaseModel):
     status_changed_at: str | None = Field(
         None, alias="statusChangedAt", description="ISO date when its status last changed."
     )
-    source: Source12 = Field(
+    source: Source13 = Field(
         ...,
         description="Where this event was extracted from. Events are single-source — not merged across sources.",
     )
@@ -2236,7 +2455,7 @@ class ExtractedClinicalEventNode(BaseModel):
     updated_at: str = Field(
         ..., alias="updatedAt", description="ISO 8601 timestamp when this node was last updated."
     )
-    payload: Payload24 | Payload25 | Payload26 | Payload27 = Field(
+    payload: Payload26 | Payload27 | Payload28 | Payload29 = Field(
         ..., description="Type-specific attributes of an `extracted_clinical_event` node."
     )
 
@@ -2292,7 +2511,7 @@ class PreciseConceptId(RootModel[str]):
     root: str = Field(..., min_length=1)
 
 
-class Member12(BaseModel):
+class Member13(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -2310,7 +2529,7 @@ class A(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    members: list[Member12] = Field(
+    members: list[Member13] = Field(
         ...,
         description="The best candidate's members — more than one for a combination product.",
         min_length=1,
@@ -2322,7 +2541,7 @@ class A(BaseModel):
     composition_id: str = Field(..., alias="compositionId", min_length=1)
 
 
-class Member13(BaseModel):
+class Member14(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -2340,7 +2559,7 @@ class B(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    members: list[Member13] = Field(
+    members: list[Member14] = Field(
         ...,
         description="The best candidate's members — more than one for a combination product.",
         min_length=1,
@@ -2362,7 +2581,7 @@ class Evidence4(BaseModel):
     kind: Literal["concept-identity-match"]
 
 
-class Member14(BaseModel):
+class Member15(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -2380,7 +2599,7 @@ class A1(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    members: list[Member14] = Field(
+    members: list[Member15] = Field(
         ...,
         description="The best candidate's members — more than one for a combination product.",
         min_length=1,
@@ -2392,7 +2611,7 @@ class A1(BaseModel):
     composition_id: str = Field(..., alias="compositionId", min_length=1)
 
 
-class Member15(BaseModel):
+class Member16(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -2410,7 +2629,7 @@ class B1(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    members: list[Member15] = Field(
+    members: list[Member16] = Field(
         ...,
         description="The best candidate's members — more than one for a combination product.",
         min_length=1,
@@ -2432,7 +2651,7 @@ class Evidence5(BaseModel):
     kind: Literal["concept-identity-partial-match"]
 
 
-class Member16(BaseModel):
+class Member17(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -2450,7 +2669,7 @@ class A2(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    members: list[Member16] = Field(
+    members: list[Member17] = Field(
         ...,
         description="The best candidate's members — more than one for a combination product.",
         min_length=1,
@@ -2462,7 +2681,7 @@ class A2(BaseModel):
     composition_id: str = Field(..., alias="compositionId", min_length=1)
 
 
-class Member17(BaseModel):
+class Member18(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -2480,7 +2699,7 @@ class B2(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    members: list[Member17] = Field(
+    members: list[Member18] = Field(
         ...,
         description="The best candidate's members — more than one for a combination product.",
         min_length=1,
@@ -2736,7 +2955,7 @@ class ChunkedIntoEdge(BaseModel):
     )
 
 
-class Payload29(BaseModel):
+class Payload31(BaseModel):
     """
     Type-specific attributes of a `relationship` edge.
     """
@@ -2781,7 +3000,7 @@ class RelationshipEdge(BaseModel):
     )
     from_: NodeRef = Field(..., alias="from")
     to: NodeRef
-    payload: Payload29 = Field(
+    payload: Payload31 = Field(
         ..., description="Type-specific attributes of a `relationship` edge."
     )
 
@@ -2882,101 +3101,6 @@ class RelationshipEdgeList(BaseModel):
     meta: Meta2 = Field(..., description="Pagination metadata for the returned page.")
 
 
-class Datum(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    registry_key: str = Field(
-        ...,
-        alias="registryKey",
-        description="The patient ID, used in every REST route, VFS path and MCP tool.",
-    )
-    patient: PatientDemographics | None
-
-
-class PatientList(BaseModel):
-    """
-    A page of registered patients.
-    """
-
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    data: list[Datum] = Field(..., description="The requested page of items.")
-    meta: Meta = Field(..., description="Pagination metadata for the returned page.")
-
-
-class Entry(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    kind: str = Field(
-        ...,
-        description="A FHIR `resourceType`, a CDA section code — your own token, echoed back.",
-        examples=["ServiceRequest"],
-        min_length=1,
-    )
-    label: str | None = Field(
-        None,
-        description="Section title, where the kind alone does not read as one.",
-        examples=["Results"],
-        min_length=1,
-    )
-    count: int = Field(..., description="How many items of this kind and outcome.", gt=0)
-    outcome: Literal["structured", "text_only", "ignored"] = Field(
-        ...,
-        description="structured: clinical detail was read from it. text_only: kept, but as prose — no structured detail was read. ignored: not used at all.",
-    )
-    reason: Literal["unsupported", "unusable", "empty"] | None = Field(
-        None, description="Present only when `outcome` is `ignored`."
-    )
-
-
-class IngestionIntakeItem(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    unit: Literal["resource", "section", "message"] = Field(
-        ...,
-        description="The sub-unit of this item: resources in a bundle, sections in a document, messages in a session.",
-    )
-    received: int = Field(..., description="Items of `unit` this one carried.", ge=0)
-    entries: list[Entry] = Field(..., description="Grouped by kind and outcome.")
-    session_id: str | None = Field(
-        None,
-        alias="sessionId",
-        description="Present on `message` items: the session the conversation was stored under — the `sessionId` it declared, or the one generated for it. Use it to continue the session or read its memories.",
-        min_length=1,
-    )
-
-
-class IngestSession(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    session_id: str | None = Field(
-        None,
-        alias="sessionId",
-        description="Id of the session these messages belong to. Omit it to open a new session under a generated id; send the same id again to continue that session.",
-        pattern="^[A-Za-z0-9][A-Za-z0-9.~:-]{0,127}$",
-    )
-    messages: list[IngestSessionsMessage] = Field(
-        ..., description="The messages, in chronological order.", min_length=1
-    )
-
-
-class SessionMemoryList(BaseModel):
-    """
-    A page of memories extracted from a session.
-    """
-
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    data: list[SessionMemory] = Field(..., description="The requested page of items.")
-    meta: Meta2 = Field(..., description="Pagination metadata for the returned page.")
-
-
 class MedicationIdentity(BaseModel):
     """
     What identifies a medication: its ingredients, its route, and for `other` the product's dose forms. Depending on how it was ingested, a medication record carries its own, and a fact the one its members share. Such a fact is returned as its identity, codes, status and effective period, and leaves its dose, route text and dates on its members. Its `display` then reads as its identity, and it carries none when no identity was found.
@@ -2987,7 +3111,7 @@ class MedicationIdentity(BaseModel):
     )
     ingredients: list[Ingredient] = Field(
         ...,
-        description="Each RxNorm ingredient, at its precise grain when it is given as a salt or ester, sorted by code.",
+        description="Each RxNorm ingredient, sorted by code. A salt or ester is named by its precise ingredient when its ingredient comes in several, and any other ingredient by itself: metformin hydrochloride, metformin's only salt, is named metformin.",
     )
     route: (
         Literal[
@@ -3029,6 +3153,145 @@ class MedicationIdentity(BaseModel):
         alias="doseForms",
         description="The product's RxNorm dose forms, sorted by code. Only for `other`, and absent when unknown.",
     )
+
+
+class Datum(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    registry_key: str = Field(
+        ...,
+        alias="registryKey",
+        description="The patient ID, used in every REST route, VFS path and MCP tool.",
+    )
+    patient: PatientDemographics | None
+
+
+class PatientList(BaseModel):
+    """
+    A page of registered patients.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    data: list[Datum] = Field(..., description="The requested page of items.")
+    meta: Meta = Field(..., description="Pagination metadata for the returned page.")
+
+
+class Entry(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    kind: str = Field(
+        ...,
+        description="What was counted: a FHIR `resourceType` or a CDA section code. For a session: a message's role. For a file: `page`, or the media type of a rejected file.",
+        examples=["ServiceRequest"],
+        min_length=1,
+    )
+    label: str | None = Field(
+        None,
+        description="Section title, where the kind alone does not read as one.",
+        examples=["Results"],
+        min_length=1,
+    )
+    count: int = Field(..., description="How many items of this kind and outcome.", gt=0)
+    page_numbers: list[PageNumber] | None = Field(
+        None,
+        alias="pageNumbers",
+        description="Present on a file's `ignored` page entries: the numbers of those pages, from 1, in ascending order. As many as `count`.",
+        min_length=1,
+    )
+    outcome: Literal["structured", "text_only", "ignored"] = Field(
+        ...,
+        description="structured: clinical detail was read from it. text_only: kept, but as prose — no structured detail was read. ignored: not used at all.",
+    )
+    reason: Literal["unsupported", "unusable", "empty", "over_limit"] | None = Field(
+        None, description="Present only when `outcome` is `ignored`."
+    )
+    limit: IngestionLimit | None = None
+
+
+class IngestionIntakeItem(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    unit: Literal["resource", "section", "message", "page", "file"] = Field(
+        ...,
+        description="The sub-unit of this item: resources in a bundle, sections in a document, messages in a session, pages in a file, or the file itself when it was rejected.",
+    )
+    received: int = Field(..., description="Items of `unit` this one carried.", ge=0)
+    entries: list[Entry] = Field(..., description="Grouped by kind and outcome.")
+    session_id: str | None = Field(
+        None,
+        alias="sessionId",
+        description="Present on `message` items: the session the conversation was stored under — the `sessionId` it declared, or the one generated for it. Use it to continue the session or read its memories.",
+        min_length=1,
+    )
+    filename: str | None = Field(
+        None,
+        description="Present on `page` and `file` items: the file's name as uploaded.",
+        examples=["labs.pdf"],
+        min_length=1,
+    )
+
+
+class IngestSession(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    session_id: str | None = Field(
+        None,
+        alias="sessionId",
+        description="Id of the session these messages belong to. Omit it to open a new session under a generated id; send the same id again to continue that session.",
+        pattern="^[A-Za-z0-9][A-Za-z0-9.~:-]{0,127}$",
+    )
+    messages: list[IngestSessionsMessage] = Field(
+        ..., description="The messages, in chronological order.", min_length=1
+    )
+
+
+class SessionMemoryList(BaseModel):
+    """
+    A page of memories extracted from a session.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    data: list[SessionMemory] = Field(..., description="The requested page of items.")
+    meta: Meta2 = Field(..., description="Pagination metadata for the returned page.")
+
+
+class Payload10(BaseModel):
+    """
+    Type-specific attributes of an `extracted_fact` node.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    identity: LabIdentity | None = None
+    test: Test | None = Field(
+        None,
+        description="The LOINC test the record's identity was read from; present with the identity.",
+    )
+    identity_evidence: (
+        LabIdentityEvidence1
+        | LabIdentityEvidence2
+        | LabIdentityEvidence3
+        | LabIdentityEvidence4
+        | None
+    ) = Field(
+        None,
+        alias="identityEvidence",
+        description="How a laboratory record's identity was decided. `identified` names the step that decided it: `code-match` reads the record's own code, `evaluation` asks a model. `excluded` rules the record out as a lab result, and `incomplete` leaves it with no identity. Depending on how it was ingested, a laboratory record carries it.",
+    )
+    source: Source1 = Field(..., description="Where this fact was extracted from.")
+    ingestion_id: str = Field(
+        ..., alias="ingestionId", description="The ingestion request that introduced this row."
+    )
+    type: Literal["laboratory"]
 
 
 class MedicationIdentityEvidence(BaseModel):
@@ -3081,116 +3344,22 @@ class FactConflicts1(BaseModel):
     conflict: list[ConflictItem] = Field(..., description="Members that carried a different value.")
 
 
-class Evidence7(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    layer: Literal["identity"]
-    a: MedicationIdentity
-    b: MedicationIdentity
-    kind: Literal["medication-identity-match"]
-
-
-class Evidence8(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    layer: Literal["identity"]
-    a: MedicationIdentity
-    b: MedicationIdentity
-    kind: Literal["medication-identity-mismatch"]
-
-
-class Evidence9(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    layer: Literal["identity"]
-    a: MedicationIdentity | None = None
-    b: MedicationIdentity | None = None
-    kind: Literal["medication-identity-incomplete"]
-
-
-class Payload28(BaseModel):
+class ComparedIdentity(BaseModel):
     """
-    Type-specific attributes of a `resolution_decision` edge.
+    One entity's identity, as an identity layer compared it. In `identity-incomplete` evidence a side is absent when it was not enriched.
     """
 
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    verdict: Literal["merge", "reject"] = Field(
+    display: str | None = Field(
+        None,
+        description="The identity as one line, e.g. `metformin / sitagliptin, oral`. Absent when the identity names nothing.",
+    )
+    identity: MedicationIdentity | LabIdentity = Field(
         ...,
-        description="The decided outcome. `continue` is a control-flow signal for stop rules and is never recorded here.",
+        description="The identity itself, shaped by `type`: a `MedicationIdentity` for a `medication`, and a `LabIdentity` for a `laboratory`.",
     )
-    resolution: Literal["uncertain", "probable", "confirmed"] = Field(
-        ...,
-        description="The quality signal carried by the verdict (confirmed | probable | uncertain) — authoritative, and the only quality measure now that confidence floats are dropped. Both merges and rejects carry one.",
-    )
-    rule_id: str = Field(
-        ...,
-        alias="ruleId",
-        description="Id of the stop rule that fired, e.g. 'deterministic-code-exact'. This is the audit's 'why'.",
-    )
-    evidence: list[
-        Evidence1
-        | Evidence2
-        | Evidence3
-        | Evidence4
-        | Evidence5
-        | Evidence6
-        | Evidence7
-        | Evidence8
-        | Evidence9
-        | Evidence10
-        | Evidence11
-        | Evidence12
-        | Evidence13
-        | Evidence14
-        | Evidence15
-        | Evidence16
-    ] = Field(
-        ...,
-        description="The full accumulated evidence the rule evaluated, in the order the layers ran.",
-    )
-
-
-class ResolutionDecisionEdge(BaseModel):
-    """
-    A `resolution_decision` edge in the patient context graph.
-    """
-
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    type: Literal["resolution_decision"]
-    id: str = Field(
-        ...,
-        description="Unique identifier for this edge: its type's prefix, `_`, then the underlying id (e.g. `rd_...`).",
-    )
-    created_at: str = Field(
-        ..., alias="createdAt", description="ISO 8601 timestamp when this edge was first created."
-    )
-    updated_at: str = Field(
-        ..., alias="updatedAt", description="ISO 8601 timestamp when this edge was last updated."
-    )
-    from_: NodeRef = Field(..., alias="from")
-    to: NodeRef
-    payload: Payload28 = Field(
-        ..., description="Type-specific attributes of a `resolution_decision` edge."
-    )
-
-
-class ResolutionDecisionEdgeList(BaseModel):
-    """
-    A page of `resolution_decision` edges from the patient context graph.
-    """
-
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    data: list[ResolutionDecisionEdge] = Field(..., description="The requested page of items.")
-    meta: Meta2 = Field(..., description="Pagination metadata for the returned page.")
 
 
 class Ingestion(BaseModel):
@@ -3205,7 +3374,7 @@ class Ingestion(BaseModel):
         ..., alias="ingestionId", description="Stable unique identifier for this submission."
     )
     source: Literal[
-        "fhir/r4", "fhir/r5", "cda/r2", "session/v1", "batch/legacy", "document/legacy"
+        "fhir/r4", "fhir/r5", "cda/r2", "session/v1", "batch/legacy", "document/legacy", "file/v1"
     ] = Field(
         ...,
         description="Version-qualified entry family. `batch/legacy` and `document/legacy` are historical only — no current route writes them.",
@@ -3365,10 +3534,11 @@ class ExtractedFactNode(BaseModel):
         | Payload7
         | Payload8
         | Payload9
+        | Payload10
     ) = Field(..., description="Type-specific attributes of an `extracted_fact` node.")
 
 
-class Payload10(BaseModel):
+class Payload11(BaseModel):
     """
     Type-specific attributes of a `fact` node.
     """
@@ -3412,7 +3582,7 @@ class Payload10(BaseModel):
     field_verdicts: dict[str, FactConflicts1] = Field(..., alias="fieldVerdicts")
 
 
-class Payload11(BaseModel):
+class Payload12(BaseModel):
     """
     Type-specific attributes of a `fact` node.
     """
@@ -3482,7 +3652,7 @@ class Payload11(BaseModel):
     field_verdicts: dict[str, FactConflicts1] = Field(..., alias="fieldVerdicts")
 
 
-class Payload12(BaseModel):
+class Payload13(BaseModel):
     """
     Type-specific attributes of a `fact` node.
     """
@@ -3540,7 +3710,7 @@ class Payload12(BaseModel):
     field_verdicts: dict[str, FactConflicts1] = Field(..., alias="fieldVerdicts")
 
 
-class Payload13(BaseModel):
+class Payload14(BaseModel):
     """
     Type-specific attributes of a `fact` node.
     """
@@ -3587,7 +3757,7 @@ class Payload13(BaseModel):
     field_verdicts: dict[str, FactConflicts1] = Field(..., alias="fieldVerdicts")
 
 
-class Payload14(BaseModel):
+class Payload15(BaseModel):
     """
     Type-specific attributes of a `fact` node.
     """
@@ -3637,7 +3807,7 @@ class Payload14(BaseModel):
     field_verdicts: dict[str, FactConflicts1] = Field(..., alias="fieldVerdicts")
 
 
-class Payload15(BaseModel):
+class Payload16(BaseModel):
     """
     Type-specific attributes of a `fact` node.
     """
@@ -3691,7 +3861,7 @@ class Payload15(BaseModel):
     field_verdicts: dict[str, FactConflicts1] = Field(..., alias="fieldVerdicts")
 
 
-class Payload16(BaseModel):
+class Payload17(BaseModel):
     """
     Type-specific attributes of a `fact` node.
     """
@@ -3733,7 +3903,7 @@ class Payload16(BaseModel):
     field_verdicts: dict[str, FactConflicts1] = Field(..., alias="fieldVerdicts")
 
 
-class Payload17(BaseModel):
+class Payload18(BaseModel):
     """
     Type-specific attributes of a `fact` node.
     """
@@ -3776,7 +3946,7 @@ class Payload17(BaseModel):
     field_verdicts: dict[str, FactConflicts1] = Field(..., alias="fieldVerdicts")
 
 
-class Payload18(BaseModel):
+class Payload19(BaseModel):
     """
     Type-specific attributes of a `fact` node.
     """
@@ -3819,7 +3989,7 @@ class Payload18(BaseModel):
     field_verdicts: dict[str, FactConflicts1] = Field(..., alias="fieldVerdicts")
 
 
-class Payload19(BaseModel):
+class Payload20(BaseModel):
     """
     Type-specific attributes of a `fact` node.
     """
@@ -3867,6 +4037,21 @@ class Payload19(BaseModel):
     field_verdicts: dict[str, FactConflicts1] = Field(..., alias="fieldVerdicts")
 
 
+class Payload21(BaseModel):
+    """
+    Type-specific attributes of a `fact` node.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    members: list[Member1] = Field(
+        ..., description="Every extracted fact this fact was projected from."
+    )
+    field_verdicts: dict[str, FactConflicts1] = Field(..., alias="fieldVerdicts")
+    type: Literal["laboratory"]
+
+
 class FactNode(BaseModel):
     """
     A `fact` node in the patient context graph.
@@ -3887,8 +4072,7 @@ class FactNode(BaseModel):
         ..., alias="updatedAt", description="ISO 8601 timestamp when this node was last updated."
     )
     payload: (
-        Payload10
-        | Payload11
+        Payload11
         | Payload12
         | Payload13
         | Payload14
@@ -3897,24 +4081,148 @@ class FactNode(BaseModel):
         | Payload17
         | Payload18
         | Payload19
+        | Payload20
+        | Payload21
     ) = Field(..., description="Type-specific attributes of a `fact` node.")
 
 
-class EdgeList(BaseModel):
+class Evidence7(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    kind: Literal["identity-match"]
+    type: Literal[
+        "condition",
+        "medication",
+        "allergy",
+        "family_history",
+        "social_history",
+        "immunization",
+        "device",
+        "demographic",
+        "insurance",
+        "directive",
+        "laboratory",
+    ] = Field(..., description="The fact type whose identities were compared.")
+    layer: Literal["identity"]
+    a: ComparedIdentity
+    b: ComparedIdentity
+
+
+class Evidence8(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    kind: Literal["identity-mismatch"]
+    type: Literal[
+        "condition",
+        "medication",
+        "allergy",
+        "family_history",
+        "social_history",
+        "immunization",
+        "device",
+        "demographic",
+        "insurance",
+        "directive",
+        "laboratory",
+    ] = Field(..., description="The fact type whose identities were compared.")
+    layer: Literal["identity"]
+    a: ComparedIdentity
+    b: ComparedIdentity
+
+
+class Evidence9(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    kind: Literal["identity-incomplete"]
+    type: Literal[
+        "condition",
+        "medication",
+        "allergy",
+        "family_history",
+        "social_history",
+        "immunization",
+        "device",
+        "demographic",
+        "insurance",
+        "directive",
+        "laboratory",
+    ] = Field(..., description="The fact type whose identities were compared.")
+    layer: Literal["identity"]
+    a: ComparedIdentity | None = None
+    b: ComparedIdentity | None = None
+
+
+class Payload30(BaseModel):
     """
-    A page of edges of one type from the patient context graph.
+    Type-specific attributes of a `resolution_decision` edge.
     """
 
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    data: list[
-        Annotated[
-            ResolutionDecisionEdge | ResolvesToEdge | ChunkedIntoEdge | RelationshipEdge,
-            Field(discriminator="type"),
-        ]
-    ] = Field(..., description="The requested page of items.")
-    meta: Meta2 = Field(..., description="Pagination metadata for the returned page.")
+    verdict: Literal["merge", "reject"] = Field(
+        ...,
+        description="The decided outcome. `continue` is a control-flow signal for stop rules and is never recorded here.",
+    )
+    resolution: Literal["uncertain", "probable", "confirmed"] = Field(
+        ...,
+        description="The quality signal carried by the verdict (confirmed | probable | uncertain) — authoritative, and the only quality measure now that confidence floats are dropped. Both merges and rejects carry one.",
+    )
+    rule_id: str = Field(
+        ...,
+        alias="ruleId",
+        description="Id of the stop rule that fired, e.g. 'deterministic-code-exact'. This is the audit's 'why'.",
+    )
+    evidence: list[
+        Evidence1
+        | Evidence2
+        | Evidence3
+        | Evidence4
+        | Evidence5
+        | Evidence6
+        | Evidence7
+        | Evidence8
+        | Evidence9
+        | Evidence10
+        | Evidence11
+        | Evidence12
+        | Evidence13
+        | Evidence14
+        | Evidence15
+        | Evidence16
+    ] = Field(
+        ...,
+        description="The full accumulated evidence the rule evaluated, in the order the layers ran.",
+    )
+
+
+class ResolutionDecisionEdge(BaseModel):
+    """
+    A `resolution_decision` edge in the patient context graph.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Literal["resolution_decision"]
+    id: str = Field(
+        ...,
+        description="Unique identifier for this edge: its type's prefix, `_`, then the underlying id (e.g. `rd_...`).",
+    )
+    created_at: str = Field(
+        ..., alias="createdAt", description="ISO 8601 timestamp when this edge was first created."
+    )
+    updated_at: str = Field(
+        ..., alias="updatedAt", description="ISO 8601 timestamp when this edge was last updated."
+    )
+    from_: NodeRef = Field(..., alias="from")
+    to: NodeRef
+    payload: Payload30 = Field(
+        ..., description="Type-specific attributes of a `resolution_decision` edge."
+    )
 
 
 class ExtractedFactNodeList(BaseModel):
@@ -3941,6 +4249,18 @@ class FactNodeList(BaseModel):
     meta: Meta2 = Field(..., description="Pagination metadata for the returned page.")
 
 
+class ResolutionDecisionEdgeList(BaseModel):
+    """
+    A page of `resolution_decision` edges from the patient context graph.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    data: list[ResolutionDecisionEdge] = Field(..., description="The requested page of items.")
+    meta: Meta2 = Field(..., description="Pagination metadata for the returned page.")
+
+
 class NodeList(BaseModel):
     """
     A page of nodes of one type from the patient context graph.
@@ -3958,6 +4278,23 @@ class NodeList(BaseModel):
             | NarrativeNode
             | LearnedMemoryNode
             | ExtractedClinicalEventNode,
+            Field(discriminator="type"),
+        ]
+    ] = Field(..., description="The requested page of items.")
+    meta: Meta2 = Field(..., description="Pagination metadata for the returned page.")
+
+
+class EdgeList(BaseModel):
+    """
+    A page of edges of one type from the patient context graph.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    data: list[
+        Annotated[
+            ResolutionDecisionEdge | ResolvesToEdge | ChunkedIntoEdge | RelationshipEdge,
             Field(discriminator="type"),
         ]
     ] = Field(..., description="The requested page of items.")

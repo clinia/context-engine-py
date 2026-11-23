@@ -65,6 +65,37 @@ def test_cda_document_posted_as_xml_not_json_string() -> None:
     assert request.content.decode() == xml
 
 
+def test_files_sent_as_one_multipart_part_each() -> None:
+    client, sent = capture(INGESTION)
+
+    client.ingest.ingest_files(
+        "patient-1",
+        {
+            "files": [
+                ("labs.pdf", b"%PDF-1.7", "application/pdf"),
+                ("scan.png", b"png", "image/png"),
+            ]
+        },
+    )
+
+    [request] = sent
+    assert request.headers["Content-Type"].startswith("multipart/form-data; boundary=")
+    body = request.read().decode()
+    assert body.count('name="files"') == 2
+    assert 'filename="labs.pdf"' in body and "Content-Type: application/pdf" in body
+    assert 'filename="scan.png"' in body and "Content-Type: image/png" in body
+
+
+def test_multipart_text_part_has_no_filename_and_none_is_omitted() -> None:
+    client, sent = capture(INGESTION)
+
+    client.ingest.ingest_files("patient-1", {"files": [], "note": "hello", "skipped": None})
+
+    body = sent[0].read().decode()
+    assert 'name="note"' in body and "filename" not in body
+    assert 'name="skipped"' not in body
+
+
 def test_every_requested_status_sent_on_ingestions_filter() -> None:
     client, sent = capture({"data": [], "meta": {"total": 0, "page": 0, "perPage": 1}})
 

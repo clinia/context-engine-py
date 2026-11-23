@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any, TypeVar, overload
+from typing import Any, TypeVar, cast, overload
 from urllib.parse import quote
 
 import httpx
@@ -34,6 +34,23 @@ def _prepare_query(query: Mapping[str, Any] | None) -> dict[str, Any] | None:
         return None
     prepared = {name: value for name, value in query.items() if value is not None}
     return prepared or None
+
+
+def _prepare_multipart(body: Mapping[str, Any]) -> list[tuple[str, Any]]:
+    """The parts of a multipart body's object form, in order, as httpx `files` entries.
+
+    A list value is one part per item under the same field name, and a `None` value is
+    omitted. A `str` is sent as a text part. Anything else is sent as a file part: `bytes`, a
+    binary file object, or a `(filename, content, content_type)` tuple.
+    """
+    parts: list[tuple[str, Any]] = []
+    for field, value in body.items():
+        if value is None:
+            continue
+        items: list[Any] = cast("list[Any]", value) if isinstance(value, list) else [value]
+        for part in items:
+            parts.append((field, (None, part) if isinstance(part, str) else part))
+    return parts
 
 
 def _prepare_json(body: Any) -> Any:
@@ -77,6 +94,7 @@ class _RequestBuilder:
         json: Any,
         content: str | bytes | None,
         content_type: str | None,
+        multipart: Mapping[str, Any] | None,
         token: str | None,
     ) -> dict[str, Any]:
         headers: dict[str, str] = {}
@@ -97,6 +115,9 @@ class _RequestBuilder:
             args["json"] = _prepare_json(json)
         if content is not None:
             args["content"] = content
+        if multipart is not None:
+            # No Content-Type here: httpx sets it with the boundary it chooses.
+            args["files"] = _prepare_multipart(multipart)
         return args
 
 
@@ -132,6 +153,7 @@ class HttpClient:
         json: Any = None,
         content: str | bytes | None = None,
         content_type: str | None = None,
+        multipart: Mapping[str, Any] | None = None,
     ) -> T: ...
 
     @overload
@@ -146,6 +168,7 @@ class HttpClient:
         json: Any = None,
         content: str | bytes | None = None,
         content_type: str | None = None,
+        multipart: Mapping[str, Any] | None = None,
     ) -> None: ...
 
     def request(
@@ -159,6 +182,7 @@ class HttpClient:
         json: Any = None,
         content: str | bytes | None = None,
         content_type: str | None = None,
+        multipart: Mapping[str, Any] | None = None,
     ) -> T | None:
         token = self._token_provider() if self._token_provider else None
         args = self._builder.build_args(
@@ -169,6 +193,7 @@ class HttpClient:
             json=json,
             content=content,
             content_type=content_type,
+            multipart=multipart,
             token=token,
         )
         try:
@@ -220,6 +245,7 @@ class AsyncHttpClient:
         json: Any = None,
         content: str | bytes | None = None,
         content_type: str | None = None,
+        multipart: Mapping[str, Any] | None = None,
     ) -> T: ...
 
     @overload
@@ -234,6 +260,7 @@ class AsyncHttpClient:
         json: Any = None,
         content: str | bytes | None = None,
         content_type: str | None = None,
+        multipart: Mapping[str, Any] | None = None,
     ) -> None: ...
 
     async def request(
@@ -247,6 +274,7 @@ class AsyncHttpClient:
         json: Any = None,
         content: str | bytes | None = None,
         content_type: str | None = None,
+        multipart: Mapping[str, Any] | None = None,
     ) -> T | None:
         token = await self._token_provider() if self._token_provider else None
         args = self._builder.build_args(
@@ -257,6 +285,7 @@ class AsyncHttpClient:
             json=json,
             content=content,
             content_type=content_type,
+            multipart=multipart,
             token=token,
         )
         try:
